@@ -78,3 +78,14 @@ private func cfuuid(_ s: String) -> CFUUID { CFUUIDCreateFromString(kCFAllocator
     #expect(d.deviceModel == "")
     #expect(d.volumePath == nil)
 }
+
+@Test func usedBytesArithmetic() {
+    #expect(DADiskInventory.usedBytes(blocks: 1_000, free: 400, blockSize: 4_096) == Int64(2_457_600))
+    #expect(DADiskInventory.usedBytes(blocks: 0, free: 0, blockSize: 4_096) == 0)
+    // More free than total (a confused FUSE filesystem): 0, not a crash.
+    #expect(DADiskInventory.usedBytes(blocks: 10, free: 20, blockSize: 4_096) == 0)
+    // Doesn't fit in Int64: nil, not a crash.
+    #expect(DADiskInventory.usedBytes(blocks: UInt64.max, free: 0, blockSize: 1) == nil)
+    #expect(DADiskInventory.usedBytes(blocks: UInt64(Int64.max), free: 0, blockSize: 2) == nil)
+    #expect(DADiskInventory.usedBytes(blocks: UInt64(Int64.max), free: 0, blockSize: 1) == Int64.max)
+}

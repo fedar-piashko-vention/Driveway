@@ -37,10 +37,11 @@ public final class HelperListener: NSObject, NSXPCListenerDelegate, @unchecked S
         let writable = CallerPolicy.bundleIsWritableByNonRoot(at: Self.bundleURL)
         guard CallerPolicy.accept(
             signingIdentifier: caller.identifier, executablePath: caller.executablePath, bundleOwnerUID: bundleOwner,
-            bundleWritableByNonRoot: writable)
+            bundleWritableByNonRoot: writable, hasHardenedRuntime: caller.hasHardenedRuntime,
+            hasDangerousEntitlements: caller.hasDangerousEntitlements)
         else {
             logger.error(
-                "Refused \(caller.identifier ?? "unsigned", privacy: .public) at \(caller.executablePath, privacy: .public) (bundle owner \(bundleOwner), writable by others: \(writable)).")
+                "Refused \(caller.identifier ?? "unsigned", privacy: .public) at \(caller.executablePath, privacy: .public) (bundle owner \(bundleOwner), writable by others: \(writable), hardened runtime: \(caller.hasHardenedRuntime), dangerous entitlements: \(caller.hasDangerousEntitlements)).")
             return false
         }
         if let id = caller.identifier {
@@ -75,10 +76,12 @@ public final class HelperListener: NSObject, NSXPCListenerDelegate, @unchecked S
     struct Caller {
         var identifier: String?
         var executablePath: String
+        var hasHardenedRuntime: Bool
+        var hasDangerousEntitlements: Bool
     }
 
-    /// The peer's signing identifier and main executable, from its audit token. Nil if the code can't be
-    /// found or its signature isn't valid.
+    /// The peer's signing identifier, main executable, hardened-runtime flag and entitlements, from its audit
+    /// token. Nil if the code can't be found or its signature isn't valid.
     static func caller(of connection: NSXPCConnection) -> Caller? {
         guard let value = connection.value(forKey: "auditToken") as? NSValue else { return nil }
         var token = audit_token_t()
@@ -86,24 +89,36 @@ public final class HelperListener: NSObject, NSXPCListenerDelegate, @unchecked S
         let tokenData = withUnsafeBytes(of: &token) { Data($0) }
         let attributes = [kSecGuestAttributeAudit as String: tokenData] as CFDictionary
         var code: SecCode?
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code,
-              SecCodeCheckValidity(code, [], nil) == errSecSuccess
-        else { return nil }
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code else { return nil }
+        return signingDetails(of: code)
+    }
+
+    /// The signing details of running code. Nil if its signature isn't valid or can't be read.
+    static func signingDetails(of code: SecCode) -> Caller? {
+        guard SecCodeCheckValidity(code, [], nil) == errSecSuccess else { return nil }
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        // A SecCode may stand in for a SecStaticCode here; that is what makes dynamic information available.
+        let flags = SecCSFlags(
+            rawValue: kSecCSSigningInformation | kSecCSDynamicInformation | kSecCSRequirementInformation)
         var info: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info)
+        guard SecCodeCopySigningInformation(unsafeBitCast(code, to: SecStaticCode.self), flags, &info)
             == errSecSuccess,
             let dict = info as? [String: Any]
         else { return nil }
         let identifier = dict[kSecCodeInfoIdentifier as String] as? String
+        let signatureFlags = (dict[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
+        let hardened = signatureFlags & SecCodeSignatureFlags.runtime.rawValue != 0
+        let dangerous = CallerPolicy.hasDangerousEntitlements(dict[kSecCodeInfoEntitlementsDict as String] as? [String: Any])
         // SecCodeCopyPath gives the bundle for bundled code; the policy compares the main executable.
-        if let executable = dict[kSecCodeInfoMainExecutable as String] as? URL {
-            return Caller(identifier: identifier, executablePath: executable.path)
+        var path = (dict[kSecCodeInfoMainExecutable as String] as? URL)?.path
+        if path == nil {
+            var url: CFURL?
+            if SecCodeCopyPath(staticCode, [], &url) == errSecSuccess, let url { path = (url as URL).path }
         }
-        var url: CFURL?
-        guard SecCodeCopyPath(staticCode, [], &url) == errSecSuccess, let url else { return nil }
-        return Caller(identifier: identifier, executablePath: (url as URL).path)
+        guard let path else { return nil }
+        return Caller(
+            identifier: identifier, executablePath: path, hasHardenedRuntime: hardened, hasDangerousEntitlements: dangerous)
     }
 }
 

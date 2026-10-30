@@ -56,7 +56,7 @@ Task {
     listener.start()
     logger.notice("Driveway helper \(helperProtocolVersion, privacy: .public) started.")
     while true {
-        try? await Task.sleep(for: .seconds(60))
+        try? await Task.sleep(for: .seconds(300))
         await refreshFeatures()
     }
 }

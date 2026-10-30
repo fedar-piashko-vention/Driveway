@@ -24,6 +24,10 @@ private let kextPolicyRows = """
     // A "-" marker means disabled, even after leading spaces.
     #expect(!MacFUSEProbe.isApproved(pluginkitOutput: "-    io.macfuse.app.fsmodule.macfuse-local((null))\tX\n"))
     #expect(!MacFUSEProbe.isApproved(pluginkitOutput: "  -  io.macfuse.app.fsmodule.macfuse-local((null))\tX\n"))
+    // Any other marker.
+    for marker in ["=", "!", "?", "*"] {
+        #expect(!MacFUSEProbe.isApproved(pluginkitOutput: "\(marker)    io.macfuse.app.fsmodule.macfuse-local((null))\tX\n"))
+    }
     // Missing line, other modules, empty output.
     #expect(!MacFUSEProbe.isApproved(pluginkitOutput: "     com.example.fsmodule((null))\tX\n"))
     #expect(!MacFUSEProbe.isApproved(pluginkitOutput: ""))

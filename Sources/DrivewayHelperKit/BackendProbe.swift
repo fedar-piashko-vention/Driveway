@@ -10,7 +10,7 @@ public actor BackendProbe: BackendProbing {
     static let bputil = Command(executable: "/usr/bin/bputil", arguments: ["-d"])
     static let kextPolicy = Command(
         executable: "/usr/bin/sqlite3",
-        arguments: ["-header", "/var/db/SystemPolicyConfiguration/KextPolicy", "select * from kext_policy;"])
+        arguments: ["-readonly", "-header", "/var/db/SystemPolicyConfiguration/KextPolicy", "select * from kext_policy;"])
     static let kmutil = Command(executable: "/usr/bin/kmutil", arguments: ["showloaded", "--list-only"])
     static let pluginkit = Command(
         executable: "/usr/bin/pluginkit", arguments: ["-m", "-v", "-p", "com.apple.fskit.fsmodule"])

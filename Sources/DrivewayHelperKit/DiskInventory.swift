@@ -114,10 +114,19 @@ public final class DADiskInventory: DiskInventoryProviding, @unchecked Sendable 
         return ProtectionPolicy.bootWholeDisks(fromDiskutilInfoPlist: Data(r.stdout.utf8))
     }
 
+    /// From the mount table entry (no `statfs(path)`, which could hang on a stuck FUSE daemon).
     public func usage(ofMountPoint mountPoint: String) -> Int64? {
-        var s = statfs()
-        guard statfs(mountPoint, &s) == 0, Self.string(fromMountName: s.f_mntonname) == mountPoint else { return nil }
-        return Int64(s.f_blocks - s.f_bfree) * Int64(s.f_bsize)
+        guard let s = Self.mountEntry(at: mountPoint) else { return nil }
+        return Self.usedBytes(blocks: s.f_blocks, free: s.f_bfree, blockSize: s.f_bsize)
+    }
+
+    /// Used bytes from statfs counts, whatever a filesystem reports: more free blocks than blocks gives 0,
+    /// and a result that doesn't fit in Int64 gives nil.
+    public static func usedBytes(blocks: UInt64, free: UInt64, blockSize: UInt32) -> Int64? {
+        let used = blocks >= free ? blocks - free : 0
+        guard let usedBlocks = Int64(exactly: used) else { return nil }
+        let (bytes, overflow) = usedBlocks.multipliedReportingOverflow(by: Int64(blockSize))
+        return overflow ? nil : bytes
     }
 
     /// Polls the mount table every 250 ms for up to 5 seconds.

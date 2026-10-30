@@ -180,12 +180,14 @@ public enum MacFUSEProbe {
     static let kextBundlePrefix = "io.macfuse.filesystems.macfuse"
     static let teamID = "3T5GSNBU6W"
 
-    /// `pluginkit -m -v -p com.apple.fskit.fsmodule`: a macFUSE module line whose first non-space character
-    /// isn't `-`. While enabled, the spike saw a blank first column (not `+`), so blank and `+` both count.
+    /// `pluginkit -m -v -p com.apple.fskit.fsmodule`: a macFUSE module line whose election marker is blank
+    /// or `+`. While enabled, the spike saw a blank first column (not `+`). Any other marker (`-` disabled,
+    /// `=`, `!`, ...) is false.
     public static func isApproved(pluginkitOutput: String) -> Bool {
         lines(pluginkitOutput).contains { line in
-            guard line.contains(fsModulePrefix) else { return false }
-            return line.first { $0 != " " && $0 != "\t" } != "-"
+            var rest = line.drop { $0 == " " || $0 == "\t" }
+            if rest.first == "+" { rest = rest.dropFirst().drop { $0 == " " || $0 == "\t" } }
+            return rest.hasPrefix(fsModulePrefix)
         }
     }
 

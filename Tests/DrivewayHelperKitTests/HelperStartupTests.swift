@@ -23,6 +23,7 @@ import Testing
     #expect(adopted?.backend == .kernel)
     #expect(adopted?.filesystem == .ntfs)
     #expect(adopted?.mountPoint == "/Volumes/BACKUP")
+    #expect(adopted?.health == .unknown)
     // Other volumes are untouched.
     #expect(volumes.first { $0.bsdName == "disk5s1" }?.mountedBy == .macOS)
 

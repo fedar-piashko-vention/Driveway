@@ -31,7 +31,8 @@ extension HelperService {
             var v = describe(d, fs)
             v.mountPoint = mountPoint
             v.access = readOnly ? .readOnly : .readWrite
-            v.health = fs == .ntfs && !readOnly ? .clean : .unknown
+            // Nothing was checked: the volume was mounted before this helper started.
+            v.health = .unknown
             v.mountedBy = .driveway
             v.backend = backend
             v.lastError = nil

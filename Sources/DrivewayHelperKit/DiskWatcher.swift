@@ -59,6 +59,7 @@ public final class DiskWatcher: @unchecked Sendable {
 
     private func appeared(_ disk: DADisk) {
         guard let d = Self.description(of: disk) else { return }
+        if Self.isOwnMount(d) { logFirstOwnMount(d, from: "appeared") }
         let service = self.service!
         let broadcast = self.broadcast
         Task {
@@ -75,17 +76,26 @@ public final class DiskWatcher: @unchecked Sendable {
         }
     }
 
+    static func isOwnMount(_ d: DiskDescription) -> Bool {
+        HelperService.ownVolumeKinds.contains(d.volumeKind?.lowercased() ?? "")
+    }
+
+    /// Logs the full description of the first Driveway mount seen, to confirm the volume kinds on a real Mac.
+    private func logFirstOwnMount(_ d: DiskDescription, from callback: String) {
+        let first = loggedOwnMount.withLock { logged in
+            defer { logged = true }
+            return !logged
+        }
+        guard first else { return }
+        logger.notice(
+            "First Driveway mount seen (\(callback, privacy: .public)): \(String(describing: d), privacy: .public)")
+    }
+
     /// Nil approves. Driveway's own mounts always pass.
     private func approveMount(_ disk: DADisk) -> Unmanaged<DADissenter>? {
         guard let d = Self.description(of: disk) else { return nil }
-        if HelperService.ownVolumeKinds.contains(d.volumeKind?.lowercased() ?? "") {
-            let first = loggedOwnMount.withLock { logged in
-                defer { logged = true }
-                return !logged
-            }
-            if first {
-                logger.info("Approved Driveway's own mount: \(String(describing: d), privacy: .public)")
-            }
+        if Self.isOwnMount(d) {
+            logFirstOwnMount(d, from: "mount approval")
             return nil
         }
         guard !service.shouldApproveMacOSMount(d) else { return nil }

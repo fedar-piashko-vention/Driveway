@@ -3,7 +3,8 @@ import Synchronization
 
 /// Decides whether an XPC peer may talk to the root helper. The app is only ad-hoc signed, so the
 /// signing identifier alone proves little. It must also run from its fixed install location, inside a
-/// bundle owned by root that no other user can modify.
+/// bundle owned by root that no other user can modify, with the hardened runtime and none of the
+/// entitlements that would let another process inject code into it.
 public enum CallerPolicy {
     /// Signing identifier -> the only executable path allowed to carry it.
     static let allowed: [String: String] = [
@@ -12,19 +13,44 @@ public enum CallerPolicy {
             "/Applications/Driveway.app/Contents/Library/LoginItems/DrivewayAgent.app/Contents/MacOS/DrivewayAgent",
     ]
 
+    /// Entitlements that reopen the doors the hardened runtime closes (debugger attach, DYLD_* variables,
+    /// unsigned libraries).
+    public static let dangerousEntitlements = [
+        "com.apple.security.get-task-allow",
+        "com.apple.security.cs.allow-dyld-environment-variables",
+        "com.apple.security.cs.disable-library-validation",
+    ]
+
     /// `bundleOwnerUID` and `bundleWritableByNonRoot` describe `/Applications/Driveway.app`.
     /// The path is compared exactly, so "..", symlink-style detours and other prefixes are refused.
+    /// Without the hardened runtime, any process of the same user could start the real executable with
+    /// `DYLD_INSERT_LIBRARIES` and pass every other check.
     public static func accept(
-        signingIdentifier: String?, executablePath: String, bundleOwnerUID: UInt32, bundleWritableByNonRoot: Bool
+        signingIdentifier: String?, executablePath: String, bundleOwnerUID: UInt32, bundleWritableByNonRoot: Bool,
+        hasHardenedRuntime: Bool, hasDangerousEntitlements: Bool
     ) -> Bool {
         guard let id = signingIdentifier, let expected = allowed[id] else { return false }
-        return executablePath == expected && bundleOwnerUID == 0 && !bundleWritableByNonRoot
+        return executablePath == expected && bundleOwnerUID == 0 && !bundleWritableByNonRoot && hasHardenedRuntime
+            && !hasDangerousEntitlements
+    }
+
+    /// True when any dangerous entitlement is present with a value other than `false`. Nil (no
+    /// entitlements) is fine.
+    public static func hasDangerousEntitlements(_ entitlements: [String: Any]?) -> Bool {
+        guard let entitlements else { return false }
+        return dangerousEntitlements.contains { key in
+            guard let value = entitlements[key] else { return false }
+            return (value as? Bool) != false
+        }
     }
 
     /// True if anything in the bundle, the bundle itself included, is owned by someone other than root or is
     /// group- or other-writable. Walks the whole tree (the nested agent bundle too) without following
     /// symbolic links. Anything that can't be checked counts as writable.
-    public static func bundleIsWritableByNonRoot(at bundle: URL) -> Bool {
+    /// `stat` is injectable for tests; the default is `lstat`.
+    public static func bundleIsWritableByNonRoot(
+        at bundle: URL, stat lstatResult: (String) -> (uid: UInt32, mode: UInt16)? = CallerPolicy.lstatResult
+    ) -> Bool {
         // The bundle itself must be a real directory: a link could be pointed elsewhere.
         guard let rootStat = lstatResult(bundle.path), rootStat.mode & S_IFMT == S_IFDIR,
               !isWritableByNonRoot(owner: rootStat.uid, mode: rootStat.mode)
@@ -49,7 +75,7 @@ public enum CallerPolicy {
     }
 
     /// The owner and mode of an item, from `lstat` (a link is not followed); nil if it can't be read.
-    static func lstatResult(_ path: String) -> (uid: UInt32, mode: UInt16)? {
+    public static func lstatResult(_ path: String) -> (uid: UInt32, mode: UInt16)? {
         var st = stat()
         guard lstat(path, &st) == 0 else { return nil }
         return (st.st_uid, st.st_mode)
