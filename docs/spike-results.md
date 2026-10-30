@@ -86,4 +86,25 @@ The macFUSE kext was blocked at 15:09 and approved by the owner at 15:10 in Priv
 
 ## Kernel extension policy
 
-Pending. A capture of `sudo bputil -d`, the `kext_policy` table and the non-Apple `kmutil showloaded` lines is waiting for the owner's password (`build/spike/logs/kext-policy.txt`). The `MacFUSEProbe.kextsAllowed` test sample comes from that capture.
+Captured on 2026-10-30. Device identifiers (ECID, nonce and image hashes) are left out on purpose.
+
+`sudo bputil -d` (root only; `bputil -d` as a user prints "The tool requires running as root"). The relevant lines, verbatim:
+
+```
+Security Mode:               Reduced    (smb0): 1
+3rd Party Kexts Status:      Enabled    (smb2): 1
+SIP Status:                  Enabled    (sip0): absent
+```
+
+`kextsAllowed` = the `3rd Party Kexts Status:` line says `Enabled`. On a Mac with Full Security the line reads `Disabled` (or `smb2` is absent). Treat anything other than `Enabled` as not allowed.
+
+`/var/db/SystemPolicyConfiguration/KextPolicy`, table `kext_policy` (root only). The macFUSE rows:
+
+```
+team_id|bundle_id|allowed|developer_name|flags
+3T5GSNBU6W|io.macfuse.filesystems.macfuse.21|1|Benjamin Fleischer|5
+3T5GSNBU6W|io.macfuse.filesystems.macfuse.23|1|Benjamin Fleischer|1
+PPNVCC9Z68|com.tuxera.filesystems.tuxera_ntfs|1|Tuxera Inc.|1
+```
+
+`kextApproved` = any row with `team_id = '3T5GSNBU6W'`, a `bundle_id` starting with `io.macfuse.filesystems.macfuse`, and `allowed = 1`. The bundle id's suffix is the macOS major version, so match the prefix. `kmutil showloaded --list-only` (works as a user) listing `io.macfuse.filesystems.macfuse` is a quicker positive signal, but the kext only loads after the first kernel-backend mount.
