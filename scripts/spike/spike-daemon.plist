@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Spike Step 4 (risk 2): run the same ntfs-3g FSKit mount from a root LaunchDaemon.
+  One-shot: RunAtLoad, no KeepAlive. The script is daemon-mount.sh in this folder; it reads
+  the NTFS partition from build/spike/ntfs.dev (written by make-images.sh). Log: /var/log/driveway-spike.log
+
+  Prerequisite: the NTFS image is attached with -nomount (make-images.sh leaves it attached).
+
+  Run these yourself (they need sudo):
+
+    sudo cp scripts/spike/spike-daemon.plist /Library/LaunchDaemons/com.driveway.spike.plist
+    sudo chown root:wheel /Library/LaunchDaemons/com.driveway.spike.plist
+    sudo chmod 644 /Library/LaunchDaemons/com.driveway.spike.plist
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.driveway.spike.plist
+
+  Run it again without reinstalling:
+
+    sudo launchctl kickstart -k system/com.driveway.spike
+
+  Remove it when done:
+
+    sudo launchctl bootout system/com.driveway.spike
+    sudo rm /Library/LaunchDaemons/com.driveway.spike.plist
+
+  Then check: cat /var/log/driveway-spike.log, Finder sidebar shows SPIKE, files owned by you.
+  Unmount afterwards with: sudo umount /Volumes/SPIKE
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.driveway.spike</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/fedarpiashko/Projects/AI/Driveway/scripts/spike/daemon-mount.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/var/log/driveway-spike.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/driveway-spike.launchd.log</string>
+</dict>
+</plist>
