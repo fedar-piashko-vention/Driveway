@@ -34,7 +34,7 @@ import Testing
 
 @Test func processRunnerTimesOut() async {
     let runner = ProcessCommandRunner(timeout: .milliseconds(300))
-    await #expect(throws: CommandRunnerError.self) {
+    await #expect(throws: CommandRunnerError.timedOut("/bin/sleep")) {
         _ = try await runner.run(Command(executable: "/bin/sleep", arguments: ["10"]))
     }
 }

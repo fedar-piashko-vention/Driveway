@@ -363,7 +363,12 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     let d = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
     let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header])
     h.runner.script(tools.e2fsck, "-y", exit: 1)
-    _ = await h.service.handle(.repair("disk6s1", force: false), authorization: auth)
+    let first = await h.service.handle(.repair("disk6s1", force: false), authorization: auth)
+    guard case .report(let plain) = first else { Issue.record("expected report, got \(first)"); return }
+    #expect(plain.mode == .repair)
+    #expect(plain.filesystem == .ext4)
+    #expect(plain.succeeded)  // exit 0: clean
+    #expect(plain.summary == "No problems found.")
     let forced = await h.service.handle(.repair("disk6s1", force: true), authorization: auth)
     #expect(h.runner.commands == [cmd(tools.e2fsck, "-p", "-f", "/dev/disk6s1"), cmd(tools.e2fsck, "-y", "-f", "/dev/disk6s1")])
     guard case .report(let r) = forced else { Issue.record("expected report"); return }
@@ -408,7 +413,9 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
 }
 
 @Test func formatWholeDiskNTFSRunsPlanOnFreshDataPartition() async {
-    let h = makeHarness(disks: [gptDisk4, efi4, disk("disk4s2", name: "BACKUP", path: "/Volumes/BACKUP")])
+    // Before the erase the data is on disk4s1 (an MBR disk); afterwards GPT puts EFI on disk4s1 and the data on disk4s2.
+    let mbrDisk4 = disk("disk4", wholeMedia: true, kind: nil, content: "FDisk_partition_scheme", name: nil)
+    let h = makeHarness(disks: [mbrDisk4, disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")])
     let after = [gptDisk4, efi4, disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP", path: "/Volumes/DRIVEWAYTMP")]
     let inventory = h.inventory
     h.runner.onRun { if $0.arguments.first == "eraseDisk" { inventory.setDisks(after) } }
@@ -490,4 +497,174 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(list.first?.mountedBy == .macOS)
     #expect(list.first?.access == .readOnly)
     #expect(list.first?.usedBytes == 1_000)
+}
+
+// MARK: - Review round 1: queueing, stale state, surfaced failures, settings
+
+@Test func concurrentAppearancesOnOneDiskBothMount() async {
+    let d1 = disk("disk4s1", name: "ONE")
+    let d2 = disk("disk4s2", name: "TWO")
+    let h = makeHarness(disks: [d1, d2], headers: ["disk4s1": ntfsHeader, "disk4s2": ntfsHeader])
+    let gate = h.runner.hold(ntfs3g, "/dev/disk4s1")
+    let service = h.service
+    async let first = service.diskAppeared(d1)
+    await gate.reached.wait()
+    async let second = service.diskAppeared(d2)
+    for _ in 0..<200 { await Task.yield() }
+    #expect(!h.runner.commands.contains { $0.arguments.first == "/dev/disk4s2" })  // waiting, not dropped
+    gate.open()
+    let (e1, e2) = await (first, second)
+    guard case .mounted(let v1) = e1, case .mounted(let v2) = e2 else {
+        Issue.record("expected both mounted, got \(String(describing: e1)) and \(String(describing: e2))")
+        return
+    }
+    #expect(v1.mountPoint == "/Volumes/ONE")
+    #expect(v2.mountPoint == "/Volumes/TWO")
+    #expect(h.runner.commands.map(\.executable) == [ntfs3g, ntfs3g])
+}
+
+@Test func requestDuringAutoMountWaitsThenRuns() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    let gate = h.runner.hold(ntfs3g, "/dev/disk4s1")
+    let service = h.service
+    async let appeared = service.diskAppeared(d)
+    await gate.reached.wait()
+    async let unmounted = service.handle(.unmount("disk4s1"), authorization: nil)
+    for _ in 0..<200 { await Task.yield() }
+    #expect(!h.runner.commands.contains(unmount4s1))
+    gate.open()
+    let (event, response) = await (appeared, unmounted)
+    if case .mounted = event {} else { Issue.record("expected .mounted, got \(String(describing: event))") }
+    #expect(response == .ok)
+    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20"), unmount4s1])
+}
+
+@Test func formatClearsStaleDetectionSoMacOSCanMountDuringErase() async {
+    let h = makeHarness(disks: [gptDisk4, efi4, disk("disk4s2", name: "BACKUP")], headers: ["disk4s2": ntfsHeader])
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)  // remembers disk4s2 as NTFS
+    let temporary = disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP")
+    #expect(!h.service.shouldApproveMacOSMount(temporary))  // the stale NTFS detection would refuse macOS
+
+    let service = h.service
+    let inventory = h.inventory
+    let duringErase = Box<[Bool]>([])
+    let after = [gptDisk4, efi4, disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP", path: "/Volumes/DRIVEWAYTMP")]
+    h.runner.onRun { c in
+        guard c.arguments.first == "eraseDisk" else { return }
+        duringErase.value = [service.shouldApproveMacOSMount(temporary),
+                             service.shouldApproveMacOSMount(disk("disk4s3", kind: "exfat", name: "NEW"))]
+        inventory.setDisks(after)
+    }
+    let r = FormatRequest(filesystem: .ntfs, label: "NEW", scheme: .gpt, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    _ = await h.service.handle(.format(r), authorization: auth)
+    #expect(duringErase.value == [true, true])
+}
+
+@Test func formatReportsMountFailureAfterSuccess() async {
+    let h = makeHarness(disks: [gptDisk4, efi4, disk("disk4s2", name: "BACKUP")], mounted: false)
+    let inventory = h.inventory
+    let after = [gptDisk4, efi4, disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP", path: "/Volumes/DRIVEWAYTMP")]
+    h.runner.onRun { if $0.arguments.first == "eraseDisk" { inventory.setDisks(after) } }
+    let r = FormatRequest(filesystem: .ntfs, label: "NEW", scheme: .gpt, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    let response = await h.service.handle(.format(r), authorization: auth)
+    #expect(response == .error(.commandFailed(
+        "The drive was formatted, but mounting it failed: The drive didn't appear in Finder after mounting.")))
+    #expect(h.runner.commands.contains(cmd(tools.mkntfs, "--quick", "--label", "NEW", "/dev/disk4s2")))
+}
+
+@Test func checkReportsRemountFailure() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
+    guard case .report(let r) = await h.service.handle(.check("disk4s1"), authorization: nil) else {
+        Issue.record("expected report")
+        return
+    }
+    #expect(r.succeeded)  // the check itself passed
+    let note = "The drive couldn't be mounted again: \(ntfs3g) is not installed."
+    #expect(r.summary == "No problems found. " + note)
+    #expect(r.rawOutput.hasSuffix(note))
+}
+
+@Test func backupReportsRemountFailure() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
+    let response = await h.service.handle(.backup("disk4s1", imagePath: "/Users/x/b.img"), authorization: auth)
+    #expect(response == .error(.commandFailed(
+        "The backup was saved, but the drive couldn't be mounted again: \(ntfs3g) is not installed.")))
+}
+
+@Test func failedHandBackIsAnEvent() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let console = ConsoleBox(ConsoleUser(uid: 501, gid: 20))
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], consoleProvider: { console.value })
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)
+    #expect(!h.service.shouldApproveMacOSMount(d))
+    console.value = nil
+    h.runner.script(diskutil, "mount", exit: 1, stderr: "nope\n")
+    let event = await h.service.diskAppeared(d)
+    guard case .mountFailed(let v, let message) = event else { Issue.record("expected .mountFailed, got \(String(describing: event))"); return }
+    #expect(message == "nope")
+    #expect(v.bsdName == "disk4s1")
+    #expect(v.lastError == "nope")
+}
+
+@Test func enablingDiskImagesNeedsAuthorization() async {
+    let denied = makeHarness(disks: [], auth: false, settings: DrivewaySettings(fskitFailedOnOSBuild: osBuild))
+    #expect(await denied.service.handle(.setSettings(DrivewaySettings(allowDiskImagesForTesting: true)), authorization: nil) == .error(.notAuthorized))
+    #expect(denied.settings.current == DrivewaySettings(fskitFailedOnOSBuild: osBuild))
+    // Other changes need no authorization.
+    #expect(await denied.service.handle(.setSettings(DrivewaySettings(autoMountNTFS: false)), authorization: nil) == .ok)
+    #expect(denied.settings.current.autoMountNTFS == false)
+
+    let allowed = makeHarness(disks: [], auth: true)
+    #expect(await allowed.service.handle(.setSettings(DrivewaySettings(allowDiskImagesForTesting: true)), authorization: auth) == .ok)
+    #expect(allowed.settings.current.allowDiskImagesForTesting)
+
+    // Turning it off again needs no authorization.
+    let on = makeHarness(disks: [], auth: false, settings: DrivewaySettings(allowDiskImagesForTesting: true))
+    #expect(await on.service.handle(.setSettings(DrivewaySettings(allowDiskImagesForTesting: false)), authorization: nil) == .ok)
+    #expect(!on.settings.current.allowDiskImagesForTesting)
+}
+
+@Test func setSettingsNeverOverwritesFSKitRecord() async {
+    let h = makeHarness(disks: [], settings: DrivewaySettings(fskitFailedOnOSBuild: osBuild))
+    #expect(await h.service.handle(.setSettings(DrivewaySettings(fskitFailedOnOSBuild: "OTHER")), authorization: nil) == .ok)
+    #expect(h.settings.current.fskitFailedOnOSBuild == osBuild)
+    #expect(await h.service.handle(.setSettings(DrivewaySettings(fskitFailedOnOSBuild: nil)), authorization: nil) == .ok)
+    #expect(h.settings.current.fskitFailedOnOSBuild == osBuild)
+
+    let empty = makeHarness(disks: [])
+    #expect(await empty.service.handle(.setSettings(DrivewaySettings(fskitFailedOnOSBuild: osBuild)), authorization: nil) == .ok)
+    #expect(empty.settings.current.fskitFailedOnOSBuild == nil)
+}
+
+@Test func fskitFailureIsRememberedWhenSaveFails() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], probe: .fskit, mounted: false, failSaves: true)
+    guard case .mountFailed = await h.service.diskAppeared(d) else { Issue.record("expected .mountFailed"); return }
+    #expect(h.settings.current.fskitFailedOnOSBuild == nil)  // the save failed
+    #expect(await h.service.handle(.backendStatus, authorization: nil) == .backend(.unavailable))
+    #expect(h.logs.value.count == 1)
+    #expect(h.logs.value.first?.contains(osBuild) == true)
+}
+
+@Test func inventoryNamesAreCheckedBeforeDevPaths() async {
+    let odd = disk("disk4s1", whole: "disk4; rm -rf /", name: "BACKUP")
+    let h = makeHarness(disks: [odd], headers: ["disk4s1": ntfsHeader])
+    #expect(await h.service.handle(.eject("disk4s1"), authorization: nil)
+        == .error(.commandFailed("The drive reported an unexpected disk name. Nothing was ejected.")))
+    #expect(h.runner.commands.isEmpty)
+
+    let h2 = makeHarness(disks: [gptDisk4, efi4, disk("disk4s2", name: "BACKUP")])
+    let inventory = h2.inventory
+    let bogus = disk("disk4s2x", whole: "disk4", kind: "exfat", name: "DRIVEWAYTMP")
+    h2.runner.onRun { if $0.arguments.first == "eraseDisk" { inventory.setDisks([gptDisk4, efi4, bogus]) } }
+    let r = FormatRequest(filesystem: .ntfs, label: "NEW", scheme: .gpt, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    #expect(await h2.service.handle(.format(r), authorization: auth)
+        == .error(.commandFailed("The drive reported an unexpected partition name. Nothing was formatted.")))
+    #expect(h2.runner.commands == [cmd(diskutil, "eraseDisk", "ExFAT", "DRIVEWAYTMP", "GPT", "/dev/disk4")])
 }

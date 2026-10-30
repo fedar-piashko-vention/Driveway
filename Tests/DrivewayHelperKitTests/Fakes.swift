@@ -12,6 +12,7 @@ final class FakeRunner: CommandRunning {
         var results: [String: CommandResult] = [:]
         var errors: [String: any Error & Sendable] = [:]
         var onRun: (@Sendable (Command) -> Void)?
+        var gates: [String: Gate] = [:]
     }
     private let state = Mutex(State())
 
@@ -36,11 +37,22 @@ final class FakeRunner: CommandRunning {
         state.withLock { $0.onRun = body }
     }
 
+    /// The next matching command is recorded, then waits until the gate opens.
+    func hold(_ executable: String, _ firstArgument: String) -> Gate {
+        let gate = Gate()
+        state.withLock { $0.gates[Self.key(executable, firstArgument)] = gate }
+        return gate
+    }
+
     func run(_ c: Command) async throws -> CommandResult {
-        let (result, error, hook) = state.withLock { s in
+        let (result, error, hook, gate) = state.withLock { s in
             s.commands.append(c)
             let k = Self.key(c.executable, c.arguments.first)
-            return (s.results[k], s.errors[k], s.onRun)
+            return (s.results[k], s.errors[k], s.onRun, s.gates.removeValue(forKey: k))
+        }
+        if let gate {
+            gate.reached.fire()
+            await gate.opened.wait()
         }
         hook?(c)
         if let error { throw error }
@@ -97,11 +109,56 @@ final class FakeInventory: DiskInventoryProviding {
 }
 
 final class MemorySettings: SettingsStoring {
-    private let state: Mutex<DrivewaySettings>
-    init(_ s: DrivewaySettings = DrivewaySettings()) { state = Mutex(s) }
-    var current: DrivewaySettings { state.withLock { $0 } }
-    func load() -> DrivewaySettings { state.withLock { $0 } }
-    func save(_ s: DrivewaySettings) throws { state.withLock { $0 = s } }
+    struct SaveFailed: Error {}
+    private let state: Mutex<(settings: DrivewaySettings, failSaves: Bool)>
+    init(_ s: DrivewaySettings = DrivewaySettings(), failSaves: Bool = false) { state = Mutex((s, failSaves)) }
+    var current: DrivewaySettings { state.withLock { $0.settings } }
+    func load() -> DrivewaySettings { state.withLock { $0.settings } }
+    func save(_ s: DrivewaySettings) throws {
+        try state.withLock {
+            if $0.failSaves { throw SaveFailed() }
+            $0.settings = s
+        }
+    }
+}
+
+/// A one-time signal for tests.
+final class Signal: Sendable {
+    private let state = Mutex<(fired: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+    func fire() {
+        let waiters = state.withLock { s -> [CheckedContinuation<Void, Never>] in
+            if s.fired { return [] }
+            s.fired = true
+            defer { s.waiters = [] }
+            return s.waiters
+        }
+        for w in waiters { w.resume() }
+    }
+    func wait() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            let now = state.withLock { s -> Bool in
+                if s.fired { return true }
+                s.waiters.append(c)
+                return false
+            }
+            if now { c.resume() }
+        }
+    }
+}
+
+final class Gate: Sendable {
+    let reached = Signal()
+    let opened = Signal()
+    func open() { opened.fire() }
+}
+
+final class Box<T: Sendable>: Sendable {
+    private let state: Mutex<T>
+    init(_ value: T) { state = Mutex(value) }
+    var value: T {
+        get { state.withLock { $0 } }
+        set { state.withLock { $0 = newValue } }
+    }
 }
 
 struct FakeProbe: BackendProbing {
@@ -158,21 +215,24 @@ struct Harness {
     let runner: FakeRunner
     let inventory: FakeInventory
     let settings: MemorySettings
+    let logs: Box<[String]>
 }
 
 func makeHarness(
     disks: [DiskDescription], headers: [String: Data] = [:], auth: Bool = true, probe: FakeProbe = .kernel,
     settings: DrivewaySettings = DrivewaySettings(), console: ConsoleUser? = ConsoleUser(uid: 501, gid: 20),
     features: [Feature: FeatureState] = allReady, boot: Set<String> = ["disk0"], mounted: Bool = true,
-    consoleProvider: (@Sendable () -> ConsoleUser?)? = nil
+    consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false
 ) -> Harness {
     let runner = FakeRunner()
     let inventory = FakeInventory(disks: disks, headers: headers, boot: boot, mounted: mounted)
-    let store = MemorySettings(settings)
+    let store = MemorySettings(settings, failSaves: failSaves)
+    let logs = Box<[String]>([])
     let service = HelperService(
         runner: runner, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
-        backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console }, features: { features })
-    return Harness(service: service, runner: runner, inventory: inventory, settings: store)
+        backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console }, features: { features },
+        log: { line in logs.value.append(line) })
+    return Harness(service: service, runner: runner, inventory: inventory, settings: store, logs: logs)
 }
 
 func cmd(_ executable: String, _ args: String...) -> Command { Command(executable: executable, arguments: args) }
