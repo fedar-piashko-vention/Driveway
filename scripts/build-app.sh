@@ -65,15 +65,18 @@ codesign --force --options runtime -s - --identifier app.driveway.agent "${AGENT
 codesign --force --options runtime -s - --identifier app.driveway.Driveway "${APP}"
 
 codesign --verify --deep --strict "${APP}"
-APP_SIG="$(codesign -dv "${APP}" 2>&1)"
-if [[ "${APP_SIG}" != *runtime* ]]; then
-    echo "Signature of ${APP} lacks the hardened runtime flag:" >&2
-    echo "${APP_SIG}" >&2
-    exit 1
-fi
+# Require the runtime flag inside the CodeDirectory flags, e.g. flags=0x10002(adhoc,runtime).
+for target in "${APP}" "${AGENT_APP}" "${HELPER}"; do
+    SIG="$(codesign -dv "${target}" 2>&1)"
+    if [[ "${SIG}" != *flags=0x*"("*runtime*")"* ]]; then
+        echo "Signature of ${target} lacks the hardened runtime flag:" >&2
+        echo "${SIG}" >&2
+        exit 1
+    fi
+done
 
 mkdir -p "${STAGING}"
-cp -R "${APP}" "${STAGING}/Driveway.app"
+ditto "${APP}" "${STAGING}/Driveway.app"
 ln -s /Applications "${STAGING}/Applications"
 rm -f "${DMG}"
 hdiutil create -volname Driveway -srcfolder "${STAGING}" -ov -format UDZO "${DMG}"
