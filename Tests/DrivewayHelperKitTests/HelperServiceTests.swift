@@ -575,6 +575,8 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
 }
 
 @Test func checkReportsRemountFailure() async {
+    let missing = "\(ntfs3g) is not installed."
+    // ntfs-3g fails, macOS's read-only mount comes back.
     let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
     h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
     h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
@@ -583,17 +585,35 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         return
     }
     #expect(r.succeeded)  // the check itself passed
-    let note = "The drive couldn't be mounted again: \(ntfs3g) is not installed."
-    #expect(r.summary == "No problems found. " + note)
-    #expect(r.rawOutput.hasSuffix(note))
+    let readOnly = "The drive is now mounted read-only by macOS, because mounting it with Driveway failed: \(missing)"
+    #expect(r.summary == "No problems found. " + readOnly)
+    #expect(r.rawOutput.hasSuffix(readOnly))
+
+    // ntfs-3g fails and macOS can't mount it either.
+    let h2 = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h2.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    h2.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
+    h2.runner.script(diskutil, "mount", exit: 1, stderr: "busy")
+    guard case .report(let r2) = await h2.service.handle(.check("disk4s1"), authorization: nil) else {
+        Issue.record("expected report")
+        return
+    }
+    #expect(r2.succeeded)
+    #expect(r2.summary == "No problems found. The drive couldn't be mounted again: \(missing)")
 }
 
 @Test func backupReportsRemountFailure() async {
+    let missing = "\(ntfs3g) is not installed."
     let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
     h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
-    let response = await h.service.handle(.backup("disk4s1", imagePath: "/Users/x/b.img"), authorization: auth)
-    #expect(response == .error(.commandFailed(
-        "The backup was saved, but the drive couldn't be mounted again: \(ntfs3g) is not installed.")))
+    #expect(await h.service.handle(.backup("disk4s1", imagePath: "/Users/x/b.img"), authorization: auth) == .error(.commandFailed(
+        "The backup was saved. The drive is now mounted read-only by macOS, because mounting it with Driveway failed: \(missing)")))
+
+    let h2 = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h2.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
+    h2.runner.script(diskutil, "mount", exit: 1, stderr: "busy")
+    #expect(await h2.service.handle(.backup("disk4s1", imagePath: "/Users/x/b.img"), authorization: auth) == .error(.commandFailed(
+        "The backup was saved. The drive couldn't be mounted again: \(missing)")))
 }
 
 @Test func failedHandBackIsAnEvent() async {
@@ -667,4 +687,102 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(await h2.service.handle(.format(r), authorization: auth)
         == .error(.commandFailed("The drive reported an unexpected partition name. Nothing was formatted.")))
     #expect(h2.runner.commands == [cmd(diskutil, "eraseDisk", "ExFAT", "DRIVEWAYTMP", "GPT", "/dev/disk4")])
+}
+
+// MARK: - Review round 2: claims beat formatting, scoped reset, eject key, deferred removals
+
+@Test func freshlyFormattedVolumeIsNotHandedToMacOSDuringDrivewaysMount() async {
+    let newVolume = disk("disk4s2", kind: "ntfs", name: "NEW")
+    // The backend probe runs inside the post-format mount, before ntfs-3g claims the volume.
+    let serviceBox = Box<HelperService?>(nil)
+    let duringProbe = Box<[Bool]>([])
+    var probe = FakeProbe.kernel
+    probe.onProbe = { if let s = serviceBox.value { duringProbe.value.append(s.shouldApproveMacOSMount(newVolume)) } }
+    let h = makeHarness(disks: [gptDisk4, efi4, disk("disk4s2", name: "BACKUP")], probe: probe)
+    serviceBox.value = h.service
+    let service = h.service
+    let inventory = h.inventory
+    let after = [gptDisk4, efi4, disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP", path: "/Volumes/DRIVEWAYTMP")]
+    let duringMount = Box<[Bool]>([])
+    h.runner.onRun { c in
+        if c.arguments.first == "eraseDisk" { inventory.setDisks(after) }
+        if c.executable == tools.ntfs3g { duringMount.value.append(service.shouldApproveMacOSMount(newVolume)) }
+    }
+    let r = FormatRequest(filesystem: .ntfs, label: "NEW", scheme: .gpt, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    guard case .volume(let v?) = await h.service.handle(.format(r), authorization: auth) else { Issue.record("expected volume"); return }
+    #expect(v.mountedBy == .driveway)
+    #expect(duringMount.value == [false])
+    #expect(duringProbe.value == [false])
+    #expect(!h.service.shouldApproveMacOSMount(newVolume))  // still Driveway's afterwards
+}
+
+@Test func partitionFormatKeepsSiblingsRefusedMount() async {
+    let sibling = disk("disk4s1", name: "ONE")
+    let console = ConsoleBox(ConsoleUser(uid: 501, gid: 20))
+    let h = makeHarness(disks: [sibling, disk("disk4s2", name: "BACKUP")], consoleProvider: { console.value })
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)
+    #expect(!h.service.shouldApproveMacOSMount(sibling))  // macOS's mount of disk4s1 refused
+
+    let service = h.service
+    let duringErase = Box<[Bool]>([])
+    h.runner.onRun { c in
+        if c.arguments.first == "eraseVolume" { duringErase.value.append(service.shouldApproveMacOSMount(sibling)) }
+    }
+    let r = FormatRequest(filesystem: .exfat, label: "STICK", scheme: .gpt, target: .partition("disk4s2"), confirmation: "BACKUP")
+    #expect(await h.service.handle(.format(r), authorization: auth) == .ok)
+    #expect(duringErase.value == [false])  // a refusal beats the format mark
+    #expect(!h.service.shouldApproveMacOSMount(sibling))  // still refused: disk4s1 wasn't erased
+
+    console.value = nil  // the sibling's turn comes, and it's left to macOS: the refused mount is handed back
+    #expect(await h.service.diskAppeared(sibling) == nil)
+    #expect(h.runner.commands.last == cmd(diskutil, "mount", "/dev/disk4s1"))
+}
+
+@Test func ejectOnlyTheQueuedWholeDisk() async {
+    let h = makeHarness(disks: [disk("disk4s1", whole: "disk7", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    #expect(await h.service.handle(.eject("disk4s1"), authorization: nil)
+        == .error(.commandFailed("The drive reported an unexpected disk name. Nothing was ejected.")))
+    #expect(h.runner.commands.isEmpty)
+}
+
+@Test func removalDuringFormatKeepsTheNewMount() async {
+    let h = makeHarness(disks: [gptDisk4, efi4, disk("disk4s2", name: "BACKUP", path: "/Volumes/BACKUP")])
+    let inventory = h.inventory
+    let after = [gptDisk4, efi4, disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP", path: "/Volumes/DRIVEWAYTMP")]
+    h.runner.onRun { if $0.arguments.first == "eraseDisk" { inventory.setDisks(after) } }
+    let gate = h.runner.hold(ntfs3g, "/dev/disk4s2")
+    let service = h.service
+    let r = FormatRequest(filesystem: .ntfs, label: "NEW", scheme: .gpt, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    async let formatted = service.handle(.format(r), authorization: auth)
+    await gate.reached.wait()
+    // DiskArbitration reports the erase's removal of the old disk4s2 late, while Driveway is mounting the new one.
+    #expect(await service.diskDisappeared("disk4s2") == .removed(bsdName: "disk4s2"))
+    gate.open()
+    guard case .volume(let v?) = await formatted else { Issue.record("expected volume"); return }
+
+    // disk4s2 is still in the inventory, so the claim and the mount record survive.
+    // (DiskArbitration may still call the new volume "exfat"; only the claim refuses macOS here.)
+    #expect(!service.shouldApproveMacOSMount(disk("disk4s2", kind: "exfat", name: "NEW")))
+    let before = h.runner.commands.count
+    #expect(await service.handle(.mount("disk4s2"), authorization: nil) == .volume(v))
+    #expect(h.runner.commands.count == before)
+}
+
+@Test func removalDuringOperationForgetsDiskThatStaysGone() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    let gate = h.runner.hold(ntfs3g, "/dev/disk4s1")
+    let service = h.service
+    async let appeared = service.diskAppeared(d)
+    await gate.reached.wait()
+    #expect(await service.diskDisappeared("disk4s1") == .removed(bsdName: "disk4s1"))
+    h.inventory.setDisks([])  // unplugged for good
+    gate.open()
+    _ = await appeared
+
+    h.inventory.setDisks([d])  // plugged in again later: no stale "already mounted"
+    let before = h.runner.commands.count
+    _ = await service.handle(.mount("disk4s1"), authorization: nil)
+    #expect(h.runner.commands.count > before)
 }

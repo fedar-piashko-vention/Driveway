@@ -165,13 +165,15 @@ struct FakeProbe: BackendProbing {
     var kextsAllowed: Bool
     var kextApproved: Bool
     var fskitEnabled: Bool
+    var onProbe: (@Sendable () -> Void)? = nil
 
     static let kernel = FakeProbe(kextsAllowed: true, kextApproved: true, fskitEnabled: false)
     static let fskit = FakeProbe(kextsAllowed: false, kextApproved: false, fskitEnabled: true)
     static let none = FakeProbe(kextsAllowed: false, kextApproved: false, fskitEnabled: false)
 
     func probe() async -> (kextsAllowed: Bool, kextApproved: Bool, fskitEnabled: Bool) {
-        (kextsAllowed, kextApproved, fskitEnabled)
+        onProbe?()
+        return (kextsAllowed, kextApproved, fskitEnabled)
     }
 }
 

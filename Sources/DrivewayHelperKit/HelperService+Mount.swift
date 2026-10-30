@@ -6,19 +6,34 @@ import Foundation
 /// and mount it again. Callers hold the disk's queue.
 extension HelperService {
     func mount(_ d: DiskDescription, _ ctx: Context, knownFilesystem: FilesystemKind? = nil) async -> HelperResponse {
-        if let existing = mounts[d.bsdName] { return .volume(existing) }
+        switch await mountOutcome(d, ctx, knownFilesystem: knownFilesystem) {
+        case .success(let v): .volume(v)
+        case .failure(let f): .error(f.error)
+        }
+    }
+
+    struct MountFailure: Error {
+        var error: HelperError
+        /// Driveway's mount failed, but macOS mounted the drive read-only instead.
+        var readOnlyByMacOS: Bool
+    }
+
+    func mountOutcome(
+        _ d: DiskDescription, _ ctx: Context, knownFilesystem: FilesystemKind? = nil
+    ) async -> Result<Volume, MountFailure> {
+        if let existing = mounts[d.bsdName] { return .success(existing) }
         var fs = FilesystemKind.other
         if let knownFilesystem { fs = knownFilesystem } else if let detected = await filesystem(of: d) { fs = detected }
         if case .takeOver(let backend, let user) = await plan(d, fs, ctx.settings, explicit: true) {
             switch await takeOver(d, fs, backend: backend, user: user, ctx: ctx) {
-            case .mounted(let v), .readOnly(let v, _): return .volume(v)
-            case .failed(_, _, let e): return .error(e)
+            case .mounted(let v), .readOnly(let v, _): return .success(v)
+            case .failed(_, _, let e, let readOnly): return .failure(MountFailure(error: e, readOnlyByMacOS: readOnly))
             }
         }
-        if d.volumePath != nil { return .volume(describe(d, fs)) }
+        if d.volumePath != nil { return .success(describe(d, fs)) }
         switch await handBackToMacOS(d.bsdName) {
-        case .failure(let e): return .error(e)
-        case .success: return .volume(describe(await refreshed(d), fs))
+        case .failure(let e): return .failure(MountFailure(error: e, readOnlyByMacOS: false))
+        case .success: return .success(describe(await refreshed(d), fs))
         }
     }
 
@@ -32,8 +47,9 @@ extension HelperService {
     }
 
     func eject(_ d: DiskDescription) async -> HelperResponse {
-        // The whole-disk name comes from the inventory: check it before building a /dev path from it.
-        guard Self.isValidBSDName(d.wholeDisk), Self.lockKey(d.wholeDisk) == d.wholeDisk else {
+        // The whole-disk name comes from the inventory: check it before building a /dev path from it, and
+        // eject only the whole disk whose queue this operation holds.
+        guard Self.isValidBSDName(d.wholeDisk), d.wholeDisk == Self.lockKey(d.bsdName) else {
             return .error(.commandFailed("The drive reported an unexpected disk name. Nothing was ejected."))
         }
         if case .failure(let e) = await runOK(ToolCommands.diskutil("eject", "/dev/\(d.wholeDisk)", paths: paths)) {
@@ -82,13 +98,13 @@ extension HelperService {
         switch result {
         case .failure(let e):
             guard let remountError else { return .error(e) }
-            return .error(.commandFailed("\(Self.text(e)) \(Self.remountNote(remountError))"))
+            return .error(.commandFailed("\(Self.text(e)) \(remountError)"))
         case .success(let r):
             // `succeeded` stays about the check itself; the mount problem is reported next to it.
             var report = Self.report(fs, mode: fs == .ntfs && mode == .repairForce ? .repair : mode, r)
             if let remountError {
-                report.summary += " " + Self.remountNote(remountError)
-                report.rawOutput += (report.rawOutput.isEmpty ? "" : "\n\n") + Self.remountNote(remountError)
+                report.summary += " " + remountError
+                report.rawOutput += (report.rawOutput.isEmpty ? "" : "\n\n") + remountError
             }
             return .report(report)
         }
@@ -106,15 +122,14 @@ extension HelperService {
         }
         switch (failure, remountError) {
         case (nil, nil): return .ok
-        case (nil, let mountError?):
-            return .error(.commandFailed("The backup was saved, but the drive couldn't be mounted again: \(mountError)"))
+        case (nil, let note?): return .error(.commandFailed("The backup was saved. \(note)"))
         case (let message?, nil): return .error(.commandFailed(message))
-        case (let message?, let mountError?): return .error(.commandFailed("\(message) \(Self.remountNote(mountError))"))
+        case (let message?, let note?): return .error(.commandFailed("\(message) \(note)"))
         }
     }
 
-    /// Unmounts `d` if it is mounted, runs `command`, then mounts it again. The second value is the
-    /// remount's error, if it failed.
+    /// Unmounts `d` if it is mounted, runs `command`, then mounts it again. The second value is a sentence
+    /// describing a remount that didn't go as before: read-only by macOS, or not mounted at all.
     func whileUnmounted(
         _ d: DiskDescription, _ ctx: Context, _ command: Command
     ) async -> (Result<CommandResult, HelperError>, String?) {
@@ -129,11 +144,15 @@ extension HelperService {
         guard wasMounted else { return (result, nil) }
         var unmounted = d
         unmounted.volumePath = nil
-        if case .error(let e) = await mount(unmounted, ctx) { return (result, Self.text(e)) }
-        return (result, nil)
+        guard case .failure(let f) = await mountOutcome(unmounted, ctx) else { return (result, nil) }
+        return (result, Self.remountNote(f))
     }
 
-    static func remountNote(_ error: String) -> String { "The drive couldn't be mounted again: \(error)" }
+    static func remountNote(_ f: MountFailure) -> String {
+        f.readOnlyByMacOS
+            ? "The drive is now mounted read-only by macOS, because mounting it with Driveway failed: \(Self.text(f.error))"
+            : "The drive couldn't be mounted again: \(Self.text(f.error))"
+    }
 
     // MARK: - Taking a drive over
 
@@ -163,7 +182,8 @@ extension HelperService {
     enum MountResult {
         case mounted(Volume)
         case readOnly(Volume, ReadOnlyReason)
-        case failed(Volume, String, HelperError)
+        /// The last value: macOS mounted the drive read-only instead.
+        case failed(Volume, String, HelperError, readOnlyByMacOS: Bool)
     }
 
     func takeOver(
@@ -179,7 +199,7 @@ extension HelperService {
         if d.volumePath != nil {
             if case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) {
                 shared.withLock { _ = $0.claimed.remove(bsd) }
-                return .failed(v, Self.text(e), e)
+                return .failed(v, Self.text(e), e, readOnlyByMacOS: false)
             }
             v.mountPoint = nil
             v.access = .notMounted
@@ -198,8 +218,9 @@ extension HelperService {
         let result: CommandResult
         switch await run(command) {
         case .failure(let e):
-            if fs == .ntfs { _ = await handBackToMacOS(bsd) } else { release(bsd) }
-            return .failed(v, Self.text(e), e)
+            var readOnly = false
+            if fs == .ntfs { readOnly = await handBack(bsd) } else { release(bsd) }
+            return .failed(v, Self.text(e), e, readOnlyByMacOS: readOnly)
         case .success(let r): result = r
         }
 
@@ -218,16 +239,16 @@ extension HelperService {
             }
             if backend == .fskit { recordFSKitFailure() }
             let message = "The drive didn't appear in Finder after mounting."
-            _ = await handBackToMacOS(bsd)
+            let readOnly = await handBack(bsd)
             v.lastError = message
-            return .failed(v, message, .commandFailed(message))
+            return .failed(v, message, .commandFailed(message), readOnlyByMacOS: readOnly)
         }
 
         guard fs == .ntfs else {
             release(bsd)
             let message = Self.message(result, command)
             v.lastError = message
-            return .failed(v, message, .commandFailed(message))
+            return .failed(v, message, .commandFailed(message), readOnlyByMacOS: false)
         }
         let outcome = NTFSMountOutcome.classify(exitCode: result.exitCode, stderr: result.stderr)
         let fallback = readOnlyFallback(after: outcome)
@@ -241,7 +262,7 @@ extension HelperService {
         v.health = fallback.health
         v.lastError = fallback.reason
         if case .failure(let e) = await handBackToMacOS(bsd) {
-            return .failed(v, fallback.reason ?? Self.text(e), e)
+            return .failed(v, fallback.reason ?? Self.text(e), e, readOnlyByMacOS: false)
         }
         var ro = describe(await refreshed(d), fs)
         ro.mountedBy = .macOS
@@ -261,6 +282,12 @@ extension HelperService {
         } catch {
             log("Couldn't save the FSKit failure for \(osBuild): \(error.localizedDescription)")
         }
+    }
+
+    /// Hands the disk back to macOS; true when macOS mounted it.
+    func handBack(_ bsd: String) async -> Bool {
+        if case .success = await handBackToMacOS(bsd) { return true }
+        return false
     }
 
     /// Lets macOS mount the disk (read-only for NTFS) and asks it to.

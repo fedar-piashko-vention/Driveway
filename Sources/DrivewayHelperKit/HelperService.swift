@@ -26,6 +26,8 @@ public actor HelperService {
     var notes: [String: (health: VolumeHealth, lastError: String?)] = [:]
     /// Whole disk -> tasks waiting for it. A key that is present means the disk is held.
     private var diskQueues: [String: [CheckedContinuation<Void, Never>]] = [:]
+    /// Disks that disappeared while their whole disk was held. Settled when the operation finishes.
+    private var pendingRemovals: Set<String> = []
     /// FSKit failed to mount on this OS build. Kept here too, so a failed settings save can't make the
     /// next probe try FSKit again.
     var fskitFailedThisBuild = false
@@ -80,23 +82,29 @@ public actor HelperService {
             guard Self.isValidBSDName(bsd) else { return .error(.unknownVolume) }
             let key = Self.lockKey(bsd)
             await lockDisk(key)
-            defer { unlockDisk(key) }
-            let d: DiskDescription
-            let ctx: Context
-            switch await resolve(bsd, request: request, authorization: authorization) {
-            case .failure(let e): return .error(e)
-            case .success(let resolved): (d, ctx) = resolved
-            }
-            switch request {
-            case .mount: return await mount(d, ctx)
-            case .unmount: return await unmount(d)
-            case .eject: return await eject(d)
-            case .fixAndMount: return await fixAndMount(d, ctx)
-            case .check: return await checkOrRepair(d, ctx, mode: .check)
-            case .repair(_, let force): return await checkOrRepair(d, ctx, mode: force ? .repairForce : .repair)
-            case .backup(_, let imagePath): return await backup(d, ctx, imagePath: imagePath)
-            default: return .error(.unknownVolume)
-            }
+            let response = await diskRequest(request, bsd, authorization: authorization)
+            await releaseDisk(key)
+            return response
+        }
+    }
+
+    /// A request for one disk. The caller holds the disk's queue.
+    private func diskRequest(_ request: HelperRequest, _ bsd: String, authorization: Data?) async -> HelperResponse {
+        let d: DiskDescription
+        let ctx: Context
+        switch await resolve(bsd, request: request, authorization: authorization) {
+        case .failure(let e): return .error(e)
+        case .success(let resolved): (d, ctx) = resolved
+        }
+        switch request {
+        case .mount: return await mount(d, ctx)
+        case .unmount: return await unmount(d)
+        case .eject: return await eject(d)
+        case .fixAndMount: return await fixAndMount(d, ctx)
+        case .check: return await checkOrRepair(d, ctx, mode: .check)
+        case .repair(_, let force): return await checkOrRepair(d, ctx, mode: force ? .repairForce : .repair)
+        case .backup(_, let imagePath): return await backup(d, ctx, imagePath: imagePath)
+        default: return .error(.unknownVolume)
         }
     }
 
@@ -145,8 +153,19 @@ public actor HelperService {
         }
     }
 
+    /// Settles removals that arrived during the operation, still holding the disk, then hands it on.
+    /// A disk that disappeared but is back in the inventory (an erase renumbering it, say) keeps its state.
+    func releaseDisk(_ key: String) async {
+        while case let pending = pendingRemovals.filter({ Self.lockKey($0) == key }), !pending.isEmpty {
+            pendingRemovals.subtract(pending)
+            let present = Set(await inventory.disks().map(\.bsdName))
+            for bsd in pending where !present.contains(bsd) { clearRemoved(bsd) }
+        }
+        unlockDisk(key)
+    }
+
     /// Hands `key` straight to the next waiter, or frees it.
-    func unlockDisk(_ key: String) {
+    private func unlockDisk(_ key: String) {
         guard var waiters = diskQueues[key] else { return }
         if waiters.isEmpty {
             diskQueues[key] = nil
@@ -197,7 +216,13 @@ public actor HelperService {
         guard Self.isValidBSDName(disk.bsdName) else { return nil }
         let key = Self.lockKey(disk.bsdName)
         await lockDisk(key)
-        defer { unlockDisk(key) }
+        let event = await appeared(disk)
+        await releaseDisk(key)
+        return event
+    }
+
+    /// The caller holds the disk's queue.
+    private func appeared(_ disk: DiskDescription) async -> VolumeEvent? {
         guard let ctx = await context() else { return nil }
         let d = ctx.disks.first { $0.bsdName == disk.bsdName } ?? disk
         guard !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return nil }
@@ -215,19 +240,29 @@ public actor HelperService {
             switch await takeOver(d, fs, backend: backend, user: user, ctx: ctx) {
             case .mounted(let v): return .mounted(v)
             case .readOnly(let v, let reason): return .mountedReadOnly(v, reason: reason)
-            case .failed(let v, let message, _): return .mountFailed(v, message: message)
+            case .failed(let v, let message, _, _): return .mountFailed(v, message: message)
             }
         }
     }
 
+    /// Reports the removal at once. If an operation holds the disk, forgetting waits until it finishes, so
+    /// a partition that an erase removes and recreates keeps the state the operation gives it.
     public func diskDisappeared(_ bsdName: String) async -> VolumeEvent {
+        if Self.isValidBSDName(bsdName), diskQueues[Self.lockKey(bsdName)] != nil {
+            pendingRemovals.insert(bsdName)
+        } else {
+            clearRemoved(bsdName)
+        }
+        return .removed(bsdName: bsdName)
+    }
+
+    private func clearRemoved(_ bsdName: String) {
         forget(bsdName)
         notes[bsdName] = nil
         shared.withLock {
             $0.macOSMountAllowed.remove(bsdName)
             $0.detected[bsdName] = nil
         }
-        return .removed(bsdName: bsdName)
     }
 
     /// Called from DiskArbitration's mount-approval callback: false only when Driveway will mount the disk
@@ -236,8 +271,9 @@ public actor HelperService {
         let bsd = disk.bsdName
         guard Self.isValidBSDName(bsd) else { return true }
         let s = shared.withLock { $0 }
+        // Driveway's own claim wins over everything, including a format in progress on the disk.
+        if s.claimed.contains(bsd) || s.blocked.contains(bsd) { return false }
         if s.formatting.contains(Self.lockKey(bsd)) || s.macOSMountAllowed.contains(bsd) { return true }
-        if s.claimed.contains(bsd) { return false }
         guard let boot = s.boot, !boot.isEmpty, case .ready = s.backend else { return true }
         let settings = store.load()
         let policy = ProtectionPolicy(bootWholeDisks: boot, allowDiskImages: settings.allowDiskImagesForTesting)

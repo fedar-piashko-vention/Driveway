@@ -15,7 +15,15 @@ extension HelperService {
         guard Self.isValidBSDName(target) else { return .error(.unknownVolume) }
         let key = Self.lockKey(target)
         await lockDisk(key)
-        defer { unlockDisk(key) }
+        let response = await formatHeld(r, target: target, wholeDiskTarget: wholeDiskTarget, key: key, authorization: authorization)
+        await releaseDisk(key)
+        return response
+    }
+
+    /// The caller holds the queue for `key`.
+    private func formatHeld(
+        _ r: FormatRequest, target: String, wholeDiskTarget: Bool, key: String, authorization: Data?
+    ) async -> HelperResponse {
 
         guard let ctx = await context() else { return .error(.protectedDisk) }
         guard let d = ctx.disks.first(where: { $0.bsdName == target }) else { return .error(.unknownVolume) }
@@ -27,15 +35,16 @@ extension HelperService {
         if ctx.policy.isProtected(d, allDisks: ctx.disks) { return .error(.protectedDisk) }
         guard auth.verify(authorization, right: AuthorizationRights.modifyDisk) else { return .error(.notAuthorized) }
 
-        // Whatever was known about these volumes is about to be wrong. Until Driveway mounts the result,
-        // macOS may mount anything on this disk (the temporary ExFAT volume, a new exFAT/FAT volume).
-        let onDisk = Set(ctx.disks.filter { $0.wholeDisk == d.wholeDisk }.map(\.bsdName)).union([target])
-        let erased = wholeDiskTarget ? onDisk : [target]
+        // What was known about the erased volumes is about to be wrong. Until Driveway mounts the result,
+        // macOS may mount new volumes on this disk (the temporary ExFAT volume, a new exFAT/FAT volume).
+        // Partitions that aren't erased keep their state, including a refused macOS mount.
+        let erased: Set<String> =
+            wholeDiskTarget
+            ? Set(ctx.disks.filter { $0.wholeDisk == d.wholeDisk }.map(\.bsdName)).union([target]) : [target]
         for bsd in erased { forget(bsd) }
-        let reset = onDisk.filter { mounts[$0] == nil }
         shared.withLock { s in
             s.formatting.insert(key)
-            for bsd in reset {
+            for bsd in erased {
                 s.detected[bsd] = nil
                 s.blocked.remove(bsd)
                 s.claimed.remove(bsd)
@@ -71,6 +80,13 @@ extension HelperService {
             if case .failure(let e) = await runOK(c) { return .error(e) }
         }
 
+        // Claim the new volume before the format mark goes, so macOS can't mount it ahead of Driveway.
+        // Every path through `mount` either keeps the claim (mounted) or releases it to macOS.
+        shared.withLock { s in
+            s.claimed.insert(dataName)
+            s.macOSMountAllowed.remove(dataName)
+            s.formatting.remove(key)
+        }
         var formatted = data
         formatted.volumePath = nil
         formatted.volumeName = r.label
