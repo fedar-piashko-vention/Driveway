@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Spike Step 3 (risk 1): mount NTFS via ntfs-3g on macFUSE FSKit, write 1 GB + 2,000 small
 # files, hash, unmount, remount, re-hash, compare. Prints PASS or FAIL.
+# BACKEND=kernel runs the same test on macFUSE's kernel extension instead of FSKit.
 set -euo pipefail
 
 usage() {
   echo "usage: $0 [--keep-mounted] <dev>" >&2
   echo "  <dev> is the NTFS data partition from make-images.sh, e.g. /dev/disk4s2" >&2
+  echo "  BACKEND=kernel $0 <dev> uses the macFUSE kernel extension instead of FSKit" >&2
   exit 2
 }
 
@@ -23,21 +25,27 @@ mkdir -p "$LOGDIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="$LOGDIR/ntfs-roundtrip-$STAMP.log"
 MP=/Volumes/SPIKE
+BACKEND="${BACKEND:-fskit}"
+case "$BACKEND" in
+  fskit) OPTS="backend=fskit,volname=SPIKE,uid=$(id -u),gid=$(id -g)" ;;
+  kernel) OPTS="volname=SPIKE,uid=$(id -u),gid=$(id -g)" ;;
+  *) echo "error: BACKEND must be fskit or kernel" >&2; exit 2 ;;
+esac
 SMALL_COUNT=2000
 
 # Tee everything we print into the log too.
 exec > >(tee -a "$LOG") 2>&1
 echo "Log: $LOG"
-echo "Device: $DEV   Mountpoint: $MP   $(date)"
+echo "Device: $DEV   Mountpoint: $MP   Backend: $BACKEND   $(date)"
 ntfs-3g --version 2>&1 || true
 
 # mount_ntfs <label>: runs the spike's mount, records exit code + stderr in the log.
 mount_ntfs() {
   local label="$1" errfile rc
   errfile="$LOGDIR/ntfs-mount-$label-$STAMP.stderr"
-  echo "--- mount ($label): sudo ntfs-3g $DEV $MP -o backend=fskit,volname=SPIKE,uid=$(id -u),gid=$(id -g)"
+  echo "--- mount ($label): sudo ntfs-3g $DEV $MP -o $OPTS"
   set +e
-  sudo ntfs-3g "$DEV" "$MP" -o "backend=fskit,volname=SPIKE,uid=$(id -u),gid=$(id -g)" 2>"$errfile"
+  sudo ntfs-3g "$DEV" "$MP" -o "$OPTS" 2>"$errfile"
   rc=$?
   set -e
   echo "ntfs-3g exit code: $rc"
@@ -52,7 +60,7 @@ mount_ntfs() {
       echo "NOTE: $MP does not exist. Creating it with sudo mkdir and retrying once."
       sudo mkdir -p "$MP"
       set +e
-      sudo ntfs-3g "$DEV" "$MP" -o "backend=fskit,volname=SPIKE,uid=$(id -u),gid=$(id -g)" 2>"$errfile.retry"
+      sudo ntfs-3g "$DEV" "$MP" -o "$OPTS" 2>"$errfile.retry"
       rc=$?
       set -e
       echo "retry exit code: $rc"

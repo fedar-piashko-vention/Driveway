@@ -1,94 +1,89 @@
-# Spike results: ntfs-3g on macFUSE FSKit
+# Spike results: ntfs-3g on macFUSE (FSKit and kernel backends)
 
-Filled in by the owner while running `scripts/spike/README.md`. Replace every `TBD`.
+Run on the owner's Mac by following `scripts/spike/README.md`. Raw notes: `build/spike/findings-2026-10-30.md` (gitignored), logs in `build/spike/logs/`.
 
-- Date: TBD
-- Mac: TBD (model, macOS version)
-- macFUSE version (`CFBundleVersion`): TBD
-- ntfs-3g version (`ntfs-3g --version`): TBD
+- Date: 2026-10-30
+- Mac: MacBookPro18,3 (Apple Silicon), macOS 15.7.7 (24G720)
+- macFUSE version (`CFBundleVersion`): 5.5.0
+- ntfs-3g version (`ntfs-3g --version`): ntfs-3g 2026.9.28 external FUSE 29
+- Tuxera NTFS (`/Library/Filesystems/tuxera_ntfs.fs`) was **still installed** for every test below.
+
+**Decision: GO for NTFS writing, with hybrid backends.** FSKit fails on this macOS. The kernel backend works, and the owner chose hybrid: kernel where kexts are already allowed, FSKit otherwise.
 
 ## Risks
 
-| # | Risk | Result (PASS / FAIL / UNTESTED) | Evidence |
+| # | Risk | Result | Evidence |
 |---|---|---|---|
-| 1 | ntfs-3g mounts NTFS read/write on macFUSE's FSKit backend and data survives unmount/remount | TBD | TBD (log file, hashes, 1 GB + 2,000 files) |
-| 2 | The mount works from a root LaunchDaemon; volume shows in Finder; files owned by console user | TBD | TBD |
-| 3 | A DiskArbitration mount-approval callback can block macOS's read-only NTFS mount, and what it does to our FSKit mount | TBD | TBD |
-| 4 | Dirty NTFS (unclean unplug, Fast Startup) is reported with usable exit codes / stderr | TBD (or `untested`) | TBD |
-| 5 | ext4 mounts via ext4fuse on FSKit and files are readable | TBD | TBD |
+| 1a | ntfs-3g mounts NTFS read/write on macFUSE's **FSKit** backend | **FAIL** | 4 runs (15:04–15:10): ntfs-3g exits 0 with empty stderr, but no mount appears. The macFUSE daemon logs `Failed to mount volume: MFDaemon.MountError Code=4`. Same for unprivileged `ext4fuse -o backend=fskit`, after a reboot, and with `backend=fskit,local`. Matches the cvmfs report (PR #4468) of an FSKit regression in later macOS 15.7 updates. |
+| 1b | ntfs-3g mounts NTFS read/write on macFUSE's **kernel** backend and data survives unmount/remount | **PASS** | `BACKEND=kernel scripts/spike/ntfs-roundtrip.sh /dev/disk4s1` (17:09). Both mounts exit 0 with empty stderr; mount type `macfuse, nodev, synchronous`. 1 GB random file + 2,000 small files: all 2,001 SHA-256 hashes identical after remount. |
+| 2 | The mount works from a root LaunchDaemon; volume shows in Finder; files owned by console user | UNTESTED (carried over) | `uid=`/`gid=` work (files show 501/20). A plain user `umount` of a root-started mount → `Operation not permitted`; `sudo umount` works, so unmount/eject goes through the helper. Daemon start and Finder eject are tested end to end later. |
+| 3 | A DiskArbitration mount-approval callback can block macOS's read-only NTFS mount | UNTESTED (carried over) | Needs Tuxera uninstalled. `scripts/spike/da-approval.swift` compiles and is ready. Also seen: after `mkntfs`, DA still reports the image partition as **ExFAT** (stale probe), so detection must read the boot sector (`FilesystemProbe.detect(header:)`). |
+| 4 | Dirty NTFS is reported with usable exit codes / stderr | untested | No Windows-used drive available. The outcome classifier keeps its default table (12 not NTFS, 13 corrupt, 14 hibernated, 15 unclean, 19 no privilege; 19 seen when ntfs-3g runs without root). |
+| 5 | ext4 mounts via ext4fuse and files are readable | **PASS on kernel**, FAIL on FSKit | Kernel backend: `ext4fuse` mounts (exit 0, type `macfuse`, kext `io.macfuse.filesystems.macfuse.23` 5.5.0 loaded). FSKit: `MountError Code=4` as in 1a. |
 
 ## Tool paths
 
+All match `ToolPaths`.
+
 | Tool | Installed path | Version / note |
 |---|---|---|
-| ntfs-3g | TBD | TBD |
-| ntfsfix | TBD | |
-| ntfsinfo | TBD | |
-| mkntfs | TBD | |
-| ntfsclone | TBD | |
-| ntfslabel | TBD | |
-| ext4fuse | TBD | |
-| e2fsck | TBD | |
-| mkfs.ext4 | TBD | |
-| macFUSE | `/Library/Filesystems/macfuse.fs` | `CFBundleVersion` = TBD |
+| ntfs-3g | `/opt/homebrew/bin/ntfs-3g` | 2026.9.28 (`gromgit/fuse/ntfs-3g-mac`) |
+| ntfsfix | `/opt/homebrew/bin/ntfsfix` | |
+| ntfsinfo | `/opt/homebrew/bin/ntfsinfo` | |
+| mkntfs | `/opt/homebrew/sbin/mkntfs` | |
+| ntfsclone | `/opt/homebrew/sbin/ntfsclone` | |
+| ntfslabel | `/opt/homebrew/sbin/ntfslabel` | |
+| ext4fuse | `/opt/homebrew/bin/ext4fuse` | `gromgit/fuse/ext4fuse-mac`, read-only |
+| e2fsck | `/opt/homebrew/opt/e2fsprogs/sbin/e2fsck` | e2fsprogs 1.47.4, keg-only |
+| mkfs.ext4 | `/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4` | |
+| macFUSE | `/Library/Filesystems/macfuse.fs` | `CFBundleVersion` = 5.5.0 |
+
+The `gromgit/fuse` tap prints "not trusted" warnings on install. The formulas still install after a y/n prompt, so Setup's brew sheet must pass that prompt through or explain it.
 
 ## ntfs-3g exit code and stderr
 
-Mount command: `sudo ntfs-3g <dev> /Volumes/SPIKE -o backend=fskit,volname=SPIKE,uid=<uid>,gid=<gid>`
-
-| Case | Exit code | stderr (verbatim) | Notes |
+| Case | Exit code | stderr | Notes |
 |---|---|---|---|
-| Clean image, first mount | TBD | TBD | |
-| Clean image, remount | TBD | TBD | |
-| From LaunchDaemon (step 4) | TBD | TBD | |
-| Unclean unplug (step 6) | TBD / untested | TBD | |
-| Fast Startup shutdown (step 6) | TBD / untested | TBD | |
-| Hibernated / other failure, if seen | TBD | TBD | |
+| FSKit, clean image (4 runs) | 0 | (empty) | No mount appears. This is the silent failure that the 5-second mount check (Global Constraints) catches. |
+| Kernel, clean image, first mount | 0 | (empty) | |
+| Kernel, clean image, remount | 0 | (empty) | |
+| No root (`ntfs-3g` as the user) | 19 | "Unprivileged user can not mount NTFS block devices using the external FUSE library" | |
+| From LaunchDaemon | untested | | later |
+| Unclean unplug / Fast Startup | untested | | |
 
-## Mount options rejected or ignored
+## Mount options
 
-| Option | Passed to | Outcome (accepted / rejected / ignored) | Evidence |
+| Option | Passed to | Outcome | Evidence |
 |---|---|---|---|
-| `backend=fskit` | ntfs-3g | TBD | TBD |
-| `volname=SPIKE` | ntfs-3g | TBD | TBD |
-| `uid=<uid>` | ntfs-3g | TBD (do files show your uid?) | TBD |
-| `gid=<gid>` | ntfs-3g | TBD | TBD |
-| `allow_other` | ext4fuse | TBD | TBD |
-| (others) | | | |
+| `backend=fskit` | ntfs-3g, ext4fuse | accepted, but FSKit mounts fail (1a) | |
+| `local` (with fskit) | ext4fuse | accepted, no change | still `MountError Code=4` |
+| `volname=SPIKE` | ntfs-3g | accepted | |
+| `uid=<uid>`, `gid=<gid>` | ntfs-3g (kernel) | accepted and applied | files listed as 501/20 |
 
-Final option list for the mount commands: TBD
+Final option list: kernel `volname=<label>,uid=<uid>,gid=<gid>[,ro]`; FSKit `backend=fskit,` + the same.
 
 ## Speed
 
-Drive: TBD (USB 3 SSD model, size). Native read-only comparison is read-only.
+Measured on a disk image only. The real USB 3 SSD comparison (spike Step 8) is carried over to the release check.
 
-| Mount | Write MB/s (4096 MB dd) | Read MB/s (4096 MB dd) | `cp -R` 10,000 files of 4-64 KB (s) |
-|---|---|---|---|
-| ntfs-3g on FSKit (read/write) | TBD | TBD | TBD |
-| macOS native NTFS (read-only) | n/a | TBD | TBD |
+| Mount | Write | Note |
+|---|---|---|
+| ntfs-3g, kernel backend, 2 GB disk image | ~206 MB/s (1 GB `dd` from `/dev/urandom`) | Disk image on the internal SSD, so the cache helps. Not representative of USB drives. |
 
-## DiskArbitration callback observations
+## DiskArbitration observations
 
-| Scenario | Callback fired? | `DAVolumeKind` | `DAVolumePath` | `DAMediaBSDName` / `DADeviceModel` | Outcome |
-|---|---|---|---|---|---|
-| Image attached without `-nomount`, callback dissenting on `ntfs` | TBD | TBD | TBD | TBD | TBD (read-only mount blocked?) |
-| FSKit mount while callback active (log-only) | TBD | TBD | TBD | TBD | TBD |
-| FSKit mount while callback dissenting on `ntfs` | TBD | TBD | TBD | TBD | TBD (blocked or not?) |
+Not run yet (risk 3). One finding so far: DA's `DAVolumeKind` was stale (ExFAT) for the image partition after `mkntfs`. Our kernel mounts show mount type `macfuse`.
 
-Other DA description keys worth noting: TBD
+## macFUSE approval detection
 
-## pluginkit (macFUSE approval detection)
+| Check | Command | Observation |
+|---|---|---|
+| FSKit module | `pluginkit -m -v -p com.apple.fskit.fsmodule` | Only `io.macfuse.app.fsmodule.macfuse-local` registers, and only after the first `backend=fskit` mount attempt. Until it's enabled in System Settings → General → Login Items & Extensions → File System Extensions, mounts fail with "Attempt to start disabled extension". While enabled, the line's first column is **blank, not `+`**, so `MacFUSEProbe.isApproved` must not require `+`. Treat a leading `-` as disabled. |
+| Kernel extension loaded | `kmutil showloaded --list-only` | `io.macfuse.filesystems.macfuse.23 (5.5.0)` after the first kernel-backend mount |
+| Kexts allowed by policy | `sudo bputil -d`, `KextPolicy` db | see "Kernel extension policy" below |
 
-Command: `pluginkit -m -v -p com.apple.fskit.fsmodule`
+The macFUSE kext was blocked at 15:09 and approved by the owner at 15:10 in Privacy & Security. Tuxera's kext is also allowed, so this Mac already runs with third-party kexts enabled.
 
-| State | Exact macFUSE line | Identifier | Marker (`+` / `-` / none) |
-|---|---|---|---|
-| Enabled in System Settings | TBD | TBD | TBD |
-| Disabled in System Settings | TBD | TBD | TBD |
-| Not installed (for reference) | none | none | n/a |
+## Kernel extension policy
 
-## Other findings
-
-TBD
-
-Decision: GO / NO-GO for NTFS writing: TBD
+Pending. A capture of `sudo bputil -d`, the `kext_policy` table and the non-Apple `kmutil showloaded` lines is waiting for the owner's password (`build/spike/logs/kext-policy.txt`). The `MacFUSEProbe.kextsAllowed` test sample comes from that capture.
