@@ -121,3 +121,38 @@ private let p = ToolPaths()
     #expect(MountNaming.mountPoint(for: "Фото 2024", existing: []) == "/Volumes/Фото 2024")
     #expect(MountNaming.fuseOptionEscaped("a,b\\c") == "a\\,b\\\\c")
 }
+
+@Test func mountPointRejectsDotNames() {
+    #expect(MountNaming.mountPoint(for: ".", existing: []) == "/Volumes/Untitled")
+    #expect(MountNaming.mountPoint(for: "..", existing: []) == "/Volumes/Untitled")
+    #expect(MountNaming.mountPoint(for: " .. ", existing: []) == "/Volumes/Untitled")
+}
+
+@Test func mountPointCollisionIsCaseInsensitive() {
+    #expect(MountNaming.mountPoint(for: "BACKUP", existing: ["/Volumes/backup"]) == "/Volumes/BACKUP 1")
+    #expect(
+        MountNaming.mountPoint(for: "BACKUP", existing: ["/Volumes/backup", "/Volumes/Backup 1"])
+            == "/Volumes/BACKUP 2")
+}
+
+@Test func mountPointTrimsAndStripsControlCharacters() {
+    #expect(MountNaming.mountPoint(for: " X ", existing: []) == "/Volumes/X")
+    #expect(MountNaming.mountPoint(for: "a\nb", existing: []) == "/Volumes/ab")
+    #expect(MountNaming.mountPoint(for: "a\u{0}b", existing: []) == "/Volumes/ab")
+    #expect(MountNaming.mountPoint(for: "\n\u{0}", existing: []) == "/Volumes/Untitled")
+}
+
+@Test func mountPointNameIsCappedAtNameMax() {
+    let ascii = String(repeating: "a", count: 300)
+    let result = MountNaming.mountPoint(for: ascii, existing: [])
+    #expect(result.hasPrefix("/Volumes/"))
+    #expect(String(result.dropFirst("/Volumes/".count)).utf8.count <= 255)
+
+    // Multi-byte characters are cut on a Character boundary, with room for a suffix.
+    let cyrillic = String(repeating: "Ф", count: 300)
+    let first = MountNaming.mountPoint(for: cyrillic, existing: [])
+    let second = MountNaming.mountPoint(for: cyrillic, existing: [first])
+    #expect(String(second.dropFirst("/Volumes/".count)).utf8.count <= 255)
+    #expect(second != first)
+    #expect(second.hasPrefix(first))
+}

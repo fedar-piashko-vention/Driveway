@@ -67,20 +67,57 @@ public enum ToolCommands {
 }
 
 public enum MountNaming {
+    /// Longest file name component, in UTF-8 bytes (NAME_MAX).
+    static let maxNameBytes = 255
+    /// Bytes kept free for a collision suffix such as " 12".
+    static let suffixReserveBytes = 8
+
     /// `/Volumes/<label>`, made unique against `existing` by appending " 1", " 2", and so on.
-    /// "/" in the label becomes ":" (Finder's POSIX mapping); an empty or whitespace-only
-    /// label becomes "Untitled". Non-ASCII is kept as is.
+    /// `existing` holds full mount-point paths (for example "/Volumes/BACKUP"); it is compared
+    /// case-insensitively because /Volumes is on case-insensitive APFS.
+    ///
+    /// The label is sanitised because the mount runs as root and anyone can set a label:
+    /// "/" becomes ":" (Finder's POSIX mapping), control characters (category Cc, including
+    /// NUL and newlines) are removed, surrounding whitespace is trimmed, and the result is
+    /// cut to fit NAME_MAX on a Character boundary, leaving room for a collision suffix.
+    /// An empty result, "." or ".." becomes "Untitled". Non-ASCII is kept as is.
     public static func mountPoint(for label: String, existing: Set<String>) -> String {
-        var name = label.replacingOccurrences(of: "/", with: ":")
-        if name.allSatisfy(\.isWhitespace) { name = "Untitled" }
+        let name = sanitizedName(label)
+        let taken = Set(existing.map { $0.lowercased() })
         let base = "/Volumes/\(name)"
         var candidate = base
         var n = 0
-        while existing.contains(candidate) {
+        while taken.contains(candidate.lowercased()) {
             n += 1
             candidate = "\(base) \(n)"
         }
         return candidate
+    }
+
+    static func sanitizedName(_ label: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in label.unicodeScalars {
+            if scalar == "/" {
+                scalars.append(":")
+            } else if scalar.properties.generalCategory != .control {
+                scalars.append(scalar)
+            }
+        }
+        var name = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
+        let budget = maxNameBytes - suffixReserveBytes
+        if name.utf8.count > budget {
+            var cut = ""
+            var bytes = 0
+            for ch in name {
+                let size = String(ch).utf8.count
+                if bytes + size > budget { break }
+                cut.append(ch)
+                bytes += size
+            }
+            name = cut.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if name.isEmpty || name == "." || name == ".." { return "Untitled" }
+        return name
     }
 
     /// Backslash-escapes `\` and `,` for use inside a comma-separated `-o` option value.
