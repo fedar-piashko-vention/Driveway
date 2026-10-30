@@ -33,6 +33,8 @@ public struct FormatRequest: Codable, Equatable, Sendable {
 }
 
 public enum FormatValidationError: Error, Codable, Equatable, Sendable {
+    /// The target is not a BSD name of the right shape ("disk4" for a whole disk, "disk4s2" for a partition).
+    case invalidTarget
     case unsupportedFilesystem
     case emptyLabel
     case labelTooLong(max: Int)
@@ -40,10 +42,15 @@ public enum FormatValidationError: Error, Codable, Equatable, Sendable {
     case confirmationMismatch
 }
 
-/// Checks a format request, in this order: filesystem, empty label (after trimming whitespace),
+/// Checks a format request, in this order: target shape, filesystem, empty label (after trimming whitespace),
 /// label length, label characters, confirmation. The label is checked exactly as it will be passed to
-/// the tools. The confirmation is compared after trimming whitespace only, and case-sensitively.
+/// the tools. The confirmation is compared after trimming whitespace only, and case-sensitively; an empty
+/// (or whitespace-only) drive name can never be confirmed.
 public func validate(_ r: FormatRequest, currentDriveName: String) throws(FormatValidationError) {
+    switch r.target {
+    case .wholeDisk(let name): if !Formatting.isWholeDiskName(name) { throw .invalidTarget }
+    case .partition(let name): if !Formatting.isPartitionName(name) { throw .invalidTarget }
+    }
     guard Formatting.supported.contains(r.filesystem) else { throw .unsupportedFilesystem }
     if r.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw .emptyLabel }
 
@@ -73,7 +80,7 @@ public func validate(_ r: FormatRequest, currentDriveName: String) throws(Format
 
     let typed = r.confirmation.trimmingCharacters(in: .whitespacesAndNewlines)
     let expected = currentDriveName.trimmingCharacters(in: .whitespacesAndNewlines)
-    if typed != expected { throw .confirmationMismatch }
+    if expected.isEmpty || typed != expected { throw .confirmationMismatch }
 }
 
 /// "All 620 GB on BACKUP will be erased". Sizes use decimal (file) units, like Finder.
@@ -101,6 +108,29 @@ enum Formatting {
         for s in " _-!#$%&'()@^{}~".unicodeScalars { set.insert(s) }
         return set
     }()
+
+    private static func isDigit(_ s: Unicode.Scalar) -> Bool { s.value >= 0x30 && s.value <= 0x39 }
+
+    /// True when `s` is `prefix` followed by one or more ASCII digits and nothing else.
+    private static func isPrefixThenDigits(_ s: Substring, prefix: String) -> Bool {
+        guard s.hasPrefix(prefix) else { return false }
+        let rest = s.unicodeScalars.dropFirst(prefix.unicodeScalars.count)
+        return !rest.isEmpty && rest.allSatisfy(isDigit)
+    }
+
+    /// `^disk[0-9]+$`
+    static func isWholeDiskName(_ s: String) -> Bool { isPrefixThenDigits(Substring(s), prefix: "disk") }
+
+    /// `^disk[0-9]+s[0-9]+$`
+    static func isPartitionName(_ s: String) -> Bool {
+        guard s.hasPrefix("disk"), let i = s.lastIndex(of: "s") else { return false }
+        return isWholeDiskName(String(s[..<i])) && isPrefixThenDigits(Substring(s[i...]), prefix: "s")
+    }
+
+    /// `^<disk>s[0-9]+$`: `s` is a partition of the whole disk `disk`.
+    static func isPartition(_ s: String, of disk: String) -> Bool {
+        isPrefixThenDigits(Substring(s), prefix: disk + "s")
+    }
 
     /// Control characters and the characters Windows reserves in names: " * / : < > ? \ |
     static func isReservedInWindowsLabel(_ s: Unicode.Scalar) -> Bool {
@@ -133,29 +163,47 @@ public enum FormatPlanner {
             case .fat32:
                 return [ToolCommands.diskutil("eraseVolume", "MS-DOS FAT32", r.label, device, paths: paths)]
             default:
-                return [ToolCommands.unmount(device: device, paths: paths)]
+                // NTFS and ext4: erase to the temporary ExFAT volume first. This also retags the partition
+                // type to Microsoft Basic Data (verified on a real disk image) and unmounts nothing that
+                // may already be unmounted.
+                return [
+                    ToolCommands.diskutil(
+                        "eraseVolume", "ExFAT", Formatting.placeholderLabel, device, paths: paths)
+                ]
             }
         }
     }
 
     /// The commands that run after `eraseCommands`, on the data partition. Empty for exFAT and FAT32.
-    /// For a partition target, pass that partition's BSD name as `dataPartition`.
+    ///
+    /// The commands are tied to the request's target. For `.partition(p)` the `dataPartition` argument is
+    /// ignored and `p` is used. For `.wholeDisk(d)` the result is empty unless `dataPartition` is a
+    /// partition of `d` (`^<d>s[0-9]+$`).
+    ///
+    /// `dataPartition` must come from a disk list enumerated after the erase step has finished: before it,
+    /// "disk4s1" may be a non-EFI partition that becomes the EFI partition afterwards. This function cannot
+    /// detect that; the helper re-checks.
     public static func finishCommands(
         _ r: FormatRequest, dataPartition: String, paths: ToolPaths
     ) -> [Command] {
-        let device = "/dev/\(dataPartition)"
-        switch r.filesystem {
-        case .ntfs:
-            return finish(.ntfs, device, r, paths, unmountFirst: wholeDisk(r))
-        case .ext4:
-            return finish(.ext4, device, r, paths, unmountFirst: wholeDisk(r))
-        default:
-            return []
+        guard r.filesystem == .ntfs || r.filesystem == .ext4 else { return [] }
+        let name: String
+        switch r.target {
+        case .partition(let p):
+            name = p
+        case .wholeDisk(let d):
+            guard Formatting.isPartition(dataPartition, of: d) else { return [] }
+            name = dataPartition
         }
+        return finish(r.filesystem, "/dev/\(name)", r, paths)
     }
 
     /// The BSD name of the partition that holds the data after a whole-disk erase: the largest partition
     /// of `wholeDisk` that is not the whole disk itself and not the EFI system partition.
+    ///
+    /// `disks` must be enumerated after the erase step has finished: before it, "disk4s1" may be a
+    /// non-EFI partition that becomes the EFI partition afterwards. This function cannot detect that;
+    /// the helper re-checks.
     public static func dataPartition(of wholeDisk: String, in disks: [DiskDescription]) -> String? {
         disks
             .filter { $0.wholeDisk == wholeDisk && !$0.isWholeMedia && !isEFI($0.contentType) }
@@ -168,22 +216,15 @@ public enum FormatPlanner {
         return c == "EFI" || c.uppercased() == Formatting.efiGUID
     }
 
-    private static func wholeDisk(_ r: FormatRequest) -> Bool {
-        if case .wholeDisk = r.target { return true }
-        return false
-    }
-
-    /// After a whole-disk erase the new ExFAT volume is mounted, so it is unmounted first. A partition
-    /// target was already unmounted by `eraseCommands`.
+    /// The new ExFAT volume is mounted after the erase step, so it is unmounted before the format.
     private static func finish(
-        _ fs: FilesystemKind, _ device: String, _ r: FormatRequest, _ paths: ToolPaths, unmountFirst: Bool
+        _ fs: FilesystemKind, _ device: String, _ r: FormatRequest, _ paths: ToolPaths
     ) -> [Command] {
-        var out: [Command] = []
-        if unmountFirst { out.append(ToolCommands.unmount(device: device, paths: paths)) }
-        out.append(
+        [
+            ToolCommands.unmount(device: device, paths: paths),
             fs == .ntfs
                 ? ToolCommands.mkntfs(device: device, label: r.label, paths: paths)
-                : ToolCommands.mkfsExt4(device: device, label: r.label, paths: paths))
-        return out
+                : ToolCommands.mkfsExt4(device: device, label: r.label, paths: paths),
+        ]
     }
 }

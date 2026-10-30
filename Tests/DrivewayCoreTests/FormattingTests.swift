@@ -132,32 +132,117 @@ private func disk(
         ])
 }
 
-@Test func partitionExt4SkipsErase() {
+@Test func partitionExt4RetagsThenMkfs() {
     let r = req(.ext4, "LBL", .partition("disk4s2"))
     #expect(
         FormatPlanner.eraseCommands(r, paths: p)
-            == [Command(executable: diskutil, arguments: ["unmount", "/dev/disk4s2"])])
+            == [
+                Command(
+                    executable: diskutil,
+                    arguments: ["eraseVolume", "ExFAT", "DRIVEWAYTMP", "/dev/disk4s2"])
+            ])
     #expect(
         FormatPlanner.finishCommands(r, dataPartition: "disk4s2", paths: p)
             == [
+                Command(executable: diskutil, arguments: ["unmount", "/dev/disk4s2"]),
                 Command(
                     executable: "/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4",
-                    arguments: ["-F", "-L", "LBL", "/dev/disk4s2"])
+                    arguments: ["-F", "-L", "LBL", "/dev/disk4s2"]),
             ])
 }
 
-@Test func partitionNtfsUnmountsThenMkntfs() {
+@Test func partitionNtfsRetagsThenMkntfs() {
     let r = req(.ntfs, "LBL", .partition("disk4s2"))
     #expect(
         FormatPlanner.eraseCommands(r, paths: p)
-            == [Command(executable: diskutil, arguments: ["unmount", "/dev/disk4s2"])])
+            == [
+                Command(
+                    executable: diskutil,
+                    arguments: ["eraseVolume", "ExFAT", "DRIVEWAYTMP", "/dev/disk4s2"])
+            ])
     #expect(
         FormatPlanner.finishCommands(r, dataPartition: "disk4s2", paths: p)
             == [
+                Command(executable: diskutil, arguments: ["unmount", "/dev/disk4s2"]),
                 Command(
                     executable: "/opt/homebrew/sbin/mkntfs",
-                    arguments: ["--quick", "--label", "LBL", "/dev/disk4s2"])
+                    arguments: ["--quick", "--label", "LBL", "/dev/disk4s2"]),
             ])
+}
+
+@Test func partitionFinishIgnoresTheDataPartitionArgument() {
+    let r = req(.ntfs, "LBL", .partition("disk4s2"))
+    #expect(
+        FormatPlanner.finishCommands(r, dataPartition: "disk9s1", paths: p)
+            == FormatPlanner.finishCommands(r, dataPartition: "disk4s2", paths: p))
+    #expect(
+        FormatPlanner.finishCommands(r, dataPartition: "disk9s1", paths: p).map(\.arguments).last
+            == ["--quick", "--label", "LBL", "/dev/disk4s2"])
+}
+
+@Test func wholeDiskFinishRequiresAPartitionOfThatDisk() {
+    for bad in ["disk40s1", "disk5s2", "disk4", "disk4s", "disk4s2x", "disk4s1s2", "", "../disk4s2", "disk4s٢"] {
+        #expect(FormatPlanner.finishCommands(req(.ntfs, "X"), dataPartition: bad, paths: p) == [], "\(bad)")
+        #expect(FormatPlanner.finishCommands(req(.ext4, "X"), dataPartition: bad, paths: p) == [], "\(bad)")
+    }
+    #expect(FormatPlanner.finishCommands(req(.ntfs, "X"), dataPartition: "disk4s12", paths: p).count == 2)
+}
+
+@Test func invalidTargetsAreRejected() {
+    for target in [
+        FormatTarget.partition("disk4"), .wholeDisk("disk4s2"), .partition("../x"), .wholeDisk(""),
+        .wholeDisk("disk"), .partition("disk4s"), .partition("disk4s2 "), .wholeDisk("/dev/disk4"),
+        .partition("disk4s2/../disk0"),
+    ] {
+        #expect(throws: FormatValidationError.invalidTarget) {
+            try validate(req(.ntfs, "X", target), currentDriveName: "BACKUP")
+        }
+    }
+    #expect(throws: Never.self) {
+        try validate(req(.ntfs, "X", .partition("disk12s34")), currentDriveName: "BACKUP")
+        try validate(req(.ntfs, "X", .wholeDisk("disk12")), currentDriveName: "BACKUP")
+    }
+}
+
+@Test func invalidTargetIsCheckedFirst() {
+    #expect(throws: FormatValidationError.invalidTarget) {
+        try validate(req(.ext2, "", .wholeDisk("x"), confirm: "no"), currentDriveName: "BACKUP")
+    }
+}
+
+@Test func emptyDriveNameCanNeverBeConfirmed() {
+    for name in ["", "   ", "\n"] {
+        #expect(throws: FormatValidationError.confirmationMismatch) {
+            try validate(req(.ntfs, "NEW", confirm: ""), currentDriveName: name)
+        }
+        #expect(throws: FormatValidationError.confirmationMismatch) {
+            try validate(req(.ntfs, "NEW", confirm: name), currentDriveName: name)
+        }
+    }
+}
+
+@Test func emojiCountsAsTwoUTF16UnitsForExfat() {
+    #expect(throws: FormatValidationError.labelTooLong(max: 11)) {
+        try validate(req(.exfat, "ABCDEFGHIJ😀"), currentDriveName: "BACKUP")
+    }
+    #expect(throws: Never.self) {
+        try validate(req(.exfat, "ABCDEFGHI😀"), currentDriveName: "BACKUP")
+    }
+}
+
+@Test func ntfsReservedCharactersAreRejected() {
+    #expect(throws: FormatValidationError.invalidCharacters) {
+        try validate(req(.ntfs, "A?B"), currentDriveName: "BACKUP")
+    }
+}
+
+@Test func tooLongBeatsInvalidCharactersBeatsConfirmation() {
+    #expect(throws: FormatValidationError.labelTooLong(max: 11)) {
+        try validate(req(.fat32, "A:BCDEFGHIJKL", confirm: "no"), currentDriveName: "BACKUP")
+    }
+    #expect(throws: FormatValidationError.invalidCharacters) {
+        try validate(req(.fat32, "A:B", confirm: "no"), currentDriveName: "BACKUP")
+    }
 }
 
 @Test func partitionExfatUsesEraseVolume() {
