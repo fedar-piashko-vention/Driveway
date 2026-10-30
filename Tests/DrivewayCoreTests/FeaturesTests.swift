@@ -28,24 +28,35 @@ struct FeaturesTests {
         var inv = full
         inv.macFUSEVersion = SemanticVersion("5.3.2")
         let installed = SemanticVersion("5.3.2")!
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
-        #expect(featureStates(inv)[.extDrives] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.extDrives] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
+    }
+
+    @Test func macFUSEVersionsCompareNumerically() {
+        for v in ["5.4.0", "5.4.1", "5.10.0", "6.0.0"] {
+            var inv = full
+            inv.macFUSEVersion = SemanticVersion(v)
+            #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .ready, "macFUSE \(v) should be ready")
+        }
+        var old = full
+        old.macFUSEVersion = SemanticVersion("5.3.2")
+        #expect(featureStates(old, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: SemanticVersion("5.3.2")!)]))
     }
 
     @Test func unapprovedMacFUSE() {
         var inv = full
         inv.backend = .needsApproval(.fskit)
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.macFUSEApproval(.fskit)]))
-        #expect(featureStates(inv)[.extDrives] == .locked(missing: [.macFUSEApproval(.fskit)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSEApproval(.fskit)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.extDrives] == .locked(missing: [.macFUSEApproval(.fskit)]))
         inv.backend = .needsApproval(.kernel)
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.macFUSEApproval(.kernel)]))
-        #expect(featureStates(inv)[.extDrives] == .locked(missing: [.macFUSEApproval(.kernel)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSEApproval(.kernel)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.extDrives] == .locked(missing: [.macFUSEApproval(.kernel)]))
     }
 
     @Test func noUsableBackendMeansNotAvailableYet() {
         var inv = full
         inv.backend = .unavailable
-        let states = featureStates(inv)
+        let states = featureStates(inv, ntfsWriteSupported: true)
         #expect(states[.writeNTFS] == .notAvailableYet)
         #expect(states[.extDrives] == .notAvailableYet)
     }
@@ -53,7 +64,7 @@ struct FeaturesTests {
     @Test func notAvailableYetWinsOverOtherMissingItemsOnceMacFUSEIsCurrent() {
         var inv = full
         inv.backend = .unavailable; inv.hasNTFS3G = false; inv.hasExt4fuse = false; inv.helperVersion = nil
-        let states = featureStates(inv)
+        let states = featureStates(inv, ntfsWriteSupported: true)
         #expect(states[.writeNTFS] == .notAvailableYet)
         #expect(states[.extDrives] == .notAvailableYet)
         #expect(states[.repairNTFS] == .locked(missing: [.ntfs3g, .helper]))
@@ -63,8 +74,8 @@ struct FeaturesTests {
         var inv = full
         inv.macFUSEVersion = nil
         inv.backend = .unavailable
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.macFUSE]))
-        #expect(featureStates(inv)[.extDrives] == .locked(missing: [.macFUSE]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSE]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.extDrives] == .locked(missing: [.macFUSE]))
     }
 
     @Test func outdatedMacFUSEIgnoresBackendApprovalAndUnavailable() {
@@ -72,15 +83,15 @@ struct FeaturesTests {
         inv.macFUSEVersion = SemanticVersion("5.3.2")
         let installed = SemanticVersion("5.3.2")!
         inv.backend = .needsApproval(.kernel)
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
         inv.backend = .unavailable
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.macFUSEUpdate(installed: installed)]))
     }
 
     @Test func readyCountIsTwoWhenBackendUnavailableAndEverythingElseInstalled() {
         var inv = full
         inv.backend = .unavailable
-        let states = featureStates(inv)
+        let states = featureStates(inv, ntfsWriteSupported: true)
         #expect(states[.readNTFS] == .ready)
         #expect(states[.repairNTFS] == .ready)
         #expect(readyCount(states) == 2)
@@ -104,29 +115,29 @@ struct FeaturesTests {
     @Test func staleHelperIsNotReady() {
         var inv = full
         inv.helperVersion = "0.9.0"
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.helperUpdate]))
-        #expect(featureStates(inv)[.repairNTFS] == .locked(missing: [.helperUpdate]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.helperUpdate]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.repairNTFS] == .locked(missing: [.helperUpdate]))
     }
 
     @Test func homebrewOnlyListedWhenABrewToolIsMissing() {
         var inv = full
         inv.hasHomebrew = false
         // All Homebrew-installed tools present: Homebrew itself is not needed.
-        #expect(readyCount(featureStates(inv)) == 4)
+        #expect(readyCount(featureStates(inv, ntfsWriteSupported: true)) == 4)
         // A missing helper alone does not need Homebrew.
         inv.helperVersion = nil
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.helper]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.helper]))
         // A missing brew tool does, but only for features that use it.
         inv.hasExt4fuse = false
-        #expect(featureStates(inv)[.extDrives] == .locked(missing: [.homebrew, .ext4fuse, .helper]))
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.helper]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.extDrives] == .locked(missing: [.homebrew, .ext4fuse, .helper]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.helper]))
     }
 
     @Test func homebrewListedForMissingOrOutdatedMacFUSE() {
         var inv = full
         inv.hasHomebrew = false
         inv.macFUSEVersion = SemanticVersion("5.3.2")
-        #expect(featureStates(inv)[.writeNTFS] == .locked(missing: [.homebrew, .macFUSEUpdate(installed: SemanticVersion("5.3.2")!)]))
+        #expect(featureStates(inv, ntfsWriteSupported: true)[.writeNTFS] == .locked(missing: [.homebrew, .macFUSEUpdate(installed: SemanticVersion("5.3.2")!)]))
     }
 
     @Test func detectsConflictingDrivers() {
@@ -156,6 +167,20 @@ struct FeaturesTests {
         #expect(SetupPolicy.shouldShowSetup(previouslyReady: nil, nowReady: Set(Feature.allCases)))
         #expect(SetupPolicy.shouldShowSetup(previouslyReady: [.readNTFS, .writeNTFS], nowReady: [.readNTFS]))
         #expect(!SetupPolicy.shouldShowSetup(previouslyReady: [.readNTFS], nowReady: [.readNTFS, .writeNTFS]))
+    }
+
+    @Test func setupPolicyEdgeCases() {
+        #expect(!SetupPolicy.shouldShowSetup(previouslyReady: [.readNTFS, .writeNTFS], nowReady: [.readNTFS, .writeNTFS]))
+        #expect(!SetupPolicy.shouldShowSetup(previouslyReady: [], nowReady: []))
+        #expect(!SetupPolicy.shouldShowSetup(previouslyReady: [], nowReady: [.readNTFS]))
+        // A feature that was ready and is now notAvailableYet (so no longer ready) is a regression.
+        var inv = full
+        let before = featureStates(inv, ntfsWriteSupported: true)
+        inv.backend = .unavailable
+        let after = featureStates(inv, ntfsWriteSupported: true)
+        #expect(after[.writeNTFS] == .notAvailableYet)
+        func ready(_ s: [Feature: FeatureState]) -> Set<Feature> { Set(s.filter { $0.value == .ready }.keys) }
+        #expect(SetupPolicy.shouldShowSetup(previouslyReady: ready(before), nowReady: ready(after)))
     }
 
     @Test func copyStrings() {
