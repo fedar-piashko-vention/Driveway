@@ -60,6 +60,42 @@ struct ProtectionTests {
         #expect(policy.isProtected(ntfs, allDisks: [ntfs, apfs]))
     }
 
+    @Test func gptNTFSWithAPFSGUIDSiblingIsProtected() {
+        let policy = ProtectionPolicy()
+        let ntfs = disk("disk9s1", whole: "disk9", kind: "ntfs", content: "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
+        let apfs = disk("disk9s2", whole: "disk9", content: "7C3457EF-0000-11AA-AA11-00306543ECAC")
+        #expect(policy.isProtected(ntfs, allDisks: [ntfs, apfs]))
+    }
+
+    @Test func gptNTFSWithExFATSiblingIsNotProtected() {
+        let policy = ProtectionPolicy()
+        let ntfs = disk("disk9s1", whole: "disk9", kind: "ntfs", content: "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
+        let exfat = disk("disk9s2", whole: "disk9", kind: "exfat", content: "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
+        #expect(!policy.isProtected(ntfs, allDisks: [ntfs, exfat]))
+    }
+
+    @Test func allAppleGPTGUIDsAreProtected() {
+        let policy = ProtectionPolicy()
+        let guids = [
+            "69646961-6700-11AA-AA11-00306543ECAC", "7C3457EF-0000-11AA-AA11-00306543ECAC",
+            "52637672-7900-11AA-AA11-00306543ECAC", "EF57347C-0000-11AA-AA11-00306543ECAC",
+            "41504653-0000-11AA-AA11-00306543ECAC", "48465300-0000-11AA-AA11-00306543ECAC",
+            "426F6F74-0000-11AA-AA11-00306543ECAC",
+        ]
+        for guid in guids {
+            let d = disk("disk11s1", whole: "disk11", content: guid)
+            #expect(policy.isProtected(d, allDisks: [d]), "\(guid)")
+        }
+    }
+
+    @Test func matchingIsCaseInsensitive() {
+        let policy = ProtectionPolicy()
+        let upperKind = disk("disk12s1", whole: "disk12", kind: "APFS")
+        #expect(policy.isProtected(upperKind, allDisks: [upperKind]))
+        let lowerGUID = disk("disk13s1", whole: "disk13", content: "7c3457ef-0000-11aa-aa11-00306543ecac")
+        #expect(policy.isProtected(lowerGUID, allDisks: [lowerGUID]))
+    }
+
     @Test func internalNonBootSDCardIsAllowed() {
         let policy = ProtectionPolicy(bootWholeDisks: ["disk0"])
         let sd = disk("disk2s1", whole: "disk2", internal: true, kind: "ntfs", content: "Microsoft Basic Data")
@@ -80,6 +116,9 @@ struct ProtectionTests {
             ["APFSPhysicalStore": "disk0s2"], ["APFSPhysicalStore": "disk1s2"],
         ]])
         #expect(ProtectionPolicy.bootWholeDisks(fromDiskutilInfoPlist: two) == ["disk0", "disk1"])
+
+        let multiDigit = try plist(["APFSPhysicalStores": [["APFSPhysicalStore": "disk10s2"]]])
+        #expect(ProtectionPolicy.bootWholeDisks(fromDiskutilInfoPlist: multiDigit) == ["disk10"])
 
         let fallback = try plist(["ParentWholeDisk": "disk3"])
         #expect(ProtectionPolicy.bootWholeDisks(fromDiskutilInfoPlist: fallback) == ["disk3"])

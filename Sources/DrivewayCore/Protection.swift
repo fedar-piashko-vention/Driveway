@@ -7,8 +7,17 @@ public struct ProtectionPolicy: Sendable {
     public var bootWholeDisks: Set<String>
     public var allowDiskImages: Bool
 
+    /// `DAMediaContent` values, lowercased. MBR/APM media report "Apple_*" names; GPT media
+    /// report partition-type GUIDs.
     static let protectedContentTypes: Set<String> = [
-        "Apple_APFS", "Apple_APFS_ISC", "Apple_APFS_Recovery", "Apple_HFS", "Apple_Boot",
+        "apple_apfs", "apple_apfs_isc", "apple_apfs_recovery", "apple_hfs", "apple_boot",
+        "7c3457ef-0000-11aa-aa11-00306543ecac",  // APFS
+        "ef57347c-0000-11aa-aa11-00306543ecac",  // APFS synthesized container
+        "41504653-0000-11aa-aa11-00306543ecac",  // APFS volume
+        "69646961-6700-11aa-aa11-00306543ecac",  // ISC
+        "52637672-7900-11aa-aa11-00306543ecac",  // Recovery
+        "48465300-0000-11aa-aa11-00306543ecac",  // HFS+
+        "426f6f74-0000-11aa-aa11-00306543ecac",  // Apple Boot
     ]
     static let protectedVolumeKinds: Set<String> = ["apfs", "hfs"]
 
@@ -17,7 +26,9 @@ public struct ProtectionPolicy: Sendable {
         self.allowDiskImages = allowDiskImages
     }
 
-    /// `allDisks` need not contain `disk` itself; the disk always counts among its own siblings.
+    /// `allDisks` must be the complete current snapshot of disks, since a protected sibling
+    /// anywhere on the same whole disk protects `disk`. It need not contain `disk` itself;
+    /// the disk always counts among its own siblings.
     public func isProtected(_ disk: DiskDescription, allDisks: [DiskDescription]) -> Bool {
         if bootWholeDisks.contains(disk.wholeDisk) { return true }
         if disk.isDiskImage && !allowDiskImages { return true }
@@ -26,8 +37,8 @@ public struct ProtectionPolicy: Sendable {
     }
 
     private static func carriesProtectedFilesystem(_ d: DiskDescription) -> Bool {
-        if let content = d.contentType, protectedContentTypes.contains(content) { return true }
-        if let kind = d.volumeKind, protectedVolumeKinds.contains(kind) { return true }
+        if let content = d.contentType, protectedContentTypes.contains(content.lowercased()) { return true }
+        if let kind = d.volumeKind, protectedVolumeKinds.contains(kind.lowercased()) { return true }
         return false
     }
 
