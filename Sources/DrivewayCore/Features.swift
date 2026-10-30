@@ -172,3 +172,59 @@ public enum SetupPolicy {
         return !previouslyReady.isSubset(of: nowReady)
     }
 }
+
+/// Parses the outputs of the tools that tell whether macFUSE's backends may run. Rules and samples are in
+/// docs/spike-results.md ("Kernel extension policy" and the FSKit module row).
+public enum MacFUSEProbe {
+    static let fsModulePrefix = "io.macfuse.app.fsmodule.macfuse"
+    static let kextBundlePrefix = "io.macfuse.filesystems.macfuse"
+    static let teamID = "3T5GSNBU6W"
+
+    /// `pluginkit -m -v -p com.apple.fskit.fsmodule`: a macFUSE module line whose first non-space character
+    /// isn't `-`. While enabled, the spike saw a blank first column (not `+`), so blank and `+` both count.
+    public static func isApproved(pluginkitOutput: String) -> Bool {
+        lines(pluginkitOutput).contains { line in
+            guard line.contains(fsModulePrefix) else { return false }
+            return line.first { $0 != " " && $0 != "\t" } != "-"
+        }
+    }
+
+    /// `kmutil showloaded --list-only` lists macFUSE's kext (`io.macfuse.filesystems.macfuse.23 (5.5.0)`).
+    public static func kextLoaded(kmutilOutput: String) -> Bool {
+        lines(kmutilOutput).contains { line in
+            line.split(whereSeparator: \.isWhitespace).contains { $0.hasPrefix(kextBundlePrefix) }
+        }
+    }
+
+    /// `bputil -d`: the `3rd Party Kexts Status:` line says `Enabled`. Anything else, or no line, is false.
+    public static func kextsAllowed(bputilOutput: String) -> Bool {
+        let label = "3rd Party Kexts Status:"
+        return lines(bputilOutput).contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix(label) else { return false }
+            return trimmed.dropFirst(label.count).split(whereSeparator: \.isWhitespace).first == "Enabled"
+        }
+    }
+
+    /// `sqlite3 -header KextPolicy "select * from kext_policy;"`: pipe-separated rows after a header row.
+    /// True when a row has macFUSE's team id, a macFUSE kext bundle id and `allowed` = 1.
+    public static func kextApproved(kextPolicyRows: String) -> Bool {
+        var rows = lines(kextPolicyRows).map { $0.split(separator: "|", omittingEmptySubsequences: false).map(String.init) }
+        guard !rows.isEmpty else { return false }
+        let header = rows.removeFirst().map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let team = header.firstIndex(of: "team_id"), let bundle = header.firstIndex(of: "bundle_id"),
+              let allowed = header.firstIndex(of: "allowed")
+        else { return false }
+        let needed = max(team, bundle, allowed)
+        return rows.contains { row in
+            guard row.count > needed else { return false }
+            return row[team].trimmingCharacters(in: .whitespaces) == teamID
+                && row[bundle].trimmingCharacters(in: .whitespaces).hasPrefix(kextBundlePrefix)
+                && row[allowed].trimmingCharacters(in: .whitespaces) == "1"
+        }
+    }
+
+    private static func lines(_ s: String) -> [Substring] {
+        s.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }
+    }
+}
