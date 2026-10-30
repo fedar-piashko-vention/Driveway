@@ -13,6 +13,12 @@ public protocol DiskInventoryProviding: Sendable {
     func usage(ofMountPoint: String) -> Int64?
     /// Polls the mount table for up to 5 seconds.
     func isMounted(at mountPoint: String) async -> Bool
+    /// Whether the volume mounted at `mountPoint` is read-only; nil when nothing is mounted there.
+    func mountIsReadOnly(_ mountPoint: String) -> Bool?
+}
+
+extension DiskInventoryProviding {
+    public func mountIsReadOnly(_ mountPoint: String) -> Bool? { nil }
 }
 
 public protocol BackendProbing: Sendable {
