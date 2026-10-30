@@ -60,6 +60,14 @@ DARegisterDiskDisappearedCallback(session, nil, { disk, _ in
     log("DISK GONE      bsd=\(stringValue(desc, "DAMediaBSDName"))  kind=\(stringValue(desc, "DAVolumeKind"))")
 }, nil)
 
+// Description changed: fires when a disk gains/changes attributes, e.g. DAVolumePath appearing
+// once the FSKit mount completes on a disk that was attached with -nomount. watch = nil means all keys.
+DARegisterDiskDescriptionChangedCallback(session, nil, nil, { disk, keys, _ in
+    let desc = description(of: disk)
+    log("DESCRIPTION CHANGED  bsd=\(stringValue(desc, "DAMediaBSDName"))  kind=\(stringValue(desc, "DAVolumeKind"))  changedKeys=\(keys)")
+    logDescription(desc)
+}, nil)
+
 // Mount approval: return nil to allow, or a retained DADissenter to block.
 DARegisterDiskMountApprovalCallback(session, nil, { disk, _ in
     let desc = description(of: disk)

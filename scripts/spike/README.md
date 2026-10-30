@@ -39,7 +39,7 @@ Record: the ntfs-3g exit code and stderr for each mount, PASS/FAIL, and which op
 ## Step 4: risk 2, mount from a root LaunchDaemon
 
 Unmount first (`umount /Volumes/SPIKE || sudo umount /Volumes/SPIKE`); keep the image attached. Then follow the commands in the comment block at the top of `scripts/spike/spike-daemon.plist` (copy to `/Library/LaunchDaemons`, `launchctl bootstrap`, later `bootout`). The daemon runs `scripts/spike/daemon-mount.sh`, which logs to `/var/log/driveway-spike.log`.
-Check: `cat /var/log/driveway-spike.log`, the volume shows in Finder's sidebar, and `ls -l /Volumes/SPIKE` shows files owned by you (the console user), not root. Record the result. Remove the daemon when done.
+Check: `cat /var/log/driveway-spike.log`, then **wait about a minute after the script has exited and run `mount | grep SPIKE` again**: the mount must still be there (the plist sets `AbandonProcessGroup` so launchd doesn't kill ntfs-3g with the script, but verify it; a mount that vanishes is the real failure, not just the script's own log). The volume shows in Finder's sidebar, and `ls -l /Volumes/SPIKE` shows files owned by you (the console user), not root. Record the result. Remove the daemon when done.
 
 ## Step 5: risk 3, DiskArbitration approval callback
 
@@ -51,6 +51,8 @@ swift scripts/spike/da-approval.swift         # dissents for DAVolumeKind == "nt
 1. Detach the images, then attach `build/spike/ntfs.dmg` **without** `-nomount` (`hdiutil attach build/spike/ntfs.dmg`). Confirm macOS's own read-only NTFS mount is blocked (the log shows `DISSENT`; the volume doesn't appear).
 2. With the callback still running, attach with `-nomount` and run the step 3 mount. Record whether the callback fires for the FSKit mount, and whether dissenting blocks it (run once with `--log-only`, once without).
 3. Copy the DA description keys/values logged for the FSKit-mounted volume, notably `DAVolumeKind` and `DAVolumePath`.
+   - The script also logs `DESCRIPTION CHANGED` events, which is where `DAVolumePath` should appear once the mount completes on a disk attached with `-nomount`.
+   - As a backup, capture these during and after the FSKit mount (in another terminal) and paste them into the results doc: `diskutil info -plist /dev/diskNsM` and `mount`.
 
 ## Step 6: risk 4, dirty NTFS (only if you have a Windows-used drive)
 
