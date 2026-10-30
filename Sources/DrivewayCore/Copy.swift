@@ -8,5 +8,7 @@ public enum Copy {
     public static let noBackendReason =
         "macFUSE can't mount drives on this macOS version with your Mac's security settings. Driveway checks again after each macOS or macFUSE update."
 
+    public static let forOlderPCs = "for older PCs"
+
     public static func featuresReady(_ n: Int) -> String { "\(n) of 4 features ready" }
 }
