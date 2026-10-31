@@ -357,6 +357,18 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     #expect(r.mode == .check)
     #expect(r.filesystem == .ntfs)
     #expect(r.rawOutput.contains("processed successfully"))
+    // ntfsfix -n always says "processed successfully": the summary claims no more than it knows.
+    #expect(r.summary == "ntfsfix found nothing it can fix.")
+}
+
+@Test func ntfsRepairSummaryIsUnchanged() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(tools.ntfsfix, "-d", exit: 0, stdout: ntfsfixOK)
+    guard case .report(let r) = await h.service.handle(.repair(ref("disk4s1"), force: false), authorization: auth) else {
+        Issue.record("expected report")
+        return
+    }
+    #expect(r.summary == "Repaired.")
 }
 
 @Test func extRepairUsesE2fsckModes() async {
@@ -586,7 +598,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     }
     #expect(r.succeeded)  // the check itself passed
     let readOnly = "The drive is now mounted read-only by macOS, because mounting it with Driveway failed: \(missing)"
-    #expect(r.summary == "No problems found. " + readOnly)
+    #expect(r.summary == "ntfsfix found nothing it can fix. " + readOnly)
     #expect(r.rawOutput.hasSuffix(readOnly))
 
     // ntfs-3g fails and macOS can't mount it either.
@@ -599,7 +611,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         return
     }
     #expect(r2.succeeded)
-    #expect(r2.summary == "No problems found. The drive couldn't be mounted again: \(missing)")
+    #expect(r2.summary == "ntfsfix found nothing it can fix. The drive couldn't be mounted again: \(missing)")
 }
 
 @Test func backupReportsRemountFailure() async {

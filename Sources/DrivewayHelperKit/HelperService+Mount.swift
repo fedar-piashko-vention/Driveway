@@ -411,8 +411,9 @@ extension HelperService {
         switch fs {
         case .ntfs:
             succeeded = NTFSFixReport.parse(raw).succeeded
+            // `ntfsfix -n` says "processed successfully" whenever it ran: it doesn't prove the drive is clean.
             summary = succeeded
-                ? (mode == .check ? "No problems found." : "Repaired.")
+                ? (mode == .check ? "ntfsfix found nothing it can fix." : "Repaired.")
                 : (mode == .check ? "ntfsfix found problems." : "ntfsfix couldn't repair this drive.")
         case .ext2, .ext3, .ext4:
             switch E2fsckOutcome.from(exitCode: r.exitCode) {
