@@ -272,7 +272,10 @@ public actor HelperService {
         // Gone already: its disappearance overtook this event.
         guard let d = ctx.disks.first(where: { $0.bsdName == disk.bsdName }) else { return nil }
         if Self.isEFI(d) { return await leave(d, nil, because: "protected (EFI system partition)") }
-        if ctx.policy.isProtected(d, allDisks: ctx.disks) { return await leave(d, nil, because: "protected") }
+        if ctx.policy.isProtected(d, allDisks: ctx.disks) {
+            // The Mac's own disks are protected every time: logging them on each start says nothing.
+            return d.isInternal ? await leaveToMacOS(d, nil) : await leave(d, nil, because: "protected")
+        }
         if let existing = mounts[d.bsdName] { return .mounted(existing) }
 
         let detection = await detect(d)
