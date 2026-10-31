@@ -59,13 +59,13 @@ private let p = ToolPaths()
         device: "/dev/disk5s1", mountPoint: "/Volumes/linux_home", volumeName: "linux_home",
         backend: .kernel, paths: p)
     #expect(kernel.executable == "/opt/homebrew/bin/ext4fuse")
-    #expect(kernel.arguments == ["/dev/disk5s1", "/Volumes/linux_home", "-o", "volname=linux_home"])
+    #expect(kernel.arguments == ["/dev/disk5s1", "/Volumes/linux_home", "-o", "volname=linux_home,allow_other,fsname=/dev/disk5s1"])
     let fskit = ToolCommands.ext4fuseMount(
         device: "/dev/disk5s1", mountPoint: "/Volumes/linux_home", volumeName: "linux_home",
         backend: .fskit, paths: p)
     #expect(
         fskit.arguments == [
-            "/dev/disk5s1", "/Volumes/linux_home", "-o", "backend=fskit,volname=linux_home",
+            "/dev/disk5s1", "/Volumes/linux_home", "-o", "backend=fskit,volname=linux_home,allow_other,fsname=/dev/disk5s1",
         ])
 }
 

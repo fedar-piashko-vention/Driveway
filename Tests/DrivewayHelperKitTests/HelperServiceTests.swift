@@ -152,7 +152,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     let d = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
     let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header], probe: .fskit)
     let event = await h.service.diskAppeared(d)
-    #expect(h.runner.commands == [cmd(tools.ext4fuse, "/dev/disk6s1", "/Volumes/LINUX", "-o", "backend=fskit,volname=LINUX")])
+    #expect(h.runner.commands == [cmd(tools.ext4fuse, "/dev/disk6s1", "/Volumes/LINUX", "-o", "backend=fskit,volname=LINUX,allow_other,fsname=/dev/disk6s1")])
     guard case .mounted(let v) = event else { Issue.record("expected .mounted"); return }
     #expect(v.filesystem == .ext4)
     #expect(v.access == .readOnly)
@@ -1069,4 +1069,26 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(await h.service.diskAppeared(d) == nil)
     #expect(h.runner.commands == [cmd(diskutil, "mount", "/dev/disk4s1")])
     #expect(h.service.shouldApproveMacOSMount(d))
+}
+
+// MARK: - Final review: ext mounts and raw-device tools (I7)
+
+@Test func rawDeviceToolsDontRunWhileTheVolumeIsStillMounted() async {
+    for request in [HelperRequest.check(ref("disk4s1")), .repair(ref("disk4s1"), force: false),
+                    .backup(ref("disk4s1"), imagePath: "/Users/x/b.img"), .fixAndMount(ref("disk4s1"))] {
+        let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+        h.inventory.setStuck(["/Volumes/BACKUP"])  // diskutil said it unmounted, but the mount is still there
+        let response = await h.service.handle(request, authorization: auth)
+        #expect(response == .error(.commandFailed(
+            "The drive is still mounted after unmounting it, so nothing was run on it. Close any files open on it and try again.")),
+            "\(request)")
+        #expect(h.runner.commands == [unmount4s1], "\(request)")
+    }
+    let e = makeHarness(disks: [disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")], headers: ["disk6s1": ext4Header])
+    e.inventory.setStuck(["/dev/disk6s1"])  // mounted somewhere Driveway doesn't know about
+    guard case .error(.commandFailed) = await e.service.handle(.check(ref("disk6s1")), authorization: nil) else {
+        Issue.record("expected commandFailed")
+        return
+    }
+    #expect(!e.runner.commands.contains { $0.executable == tools.e2fsck })
 }

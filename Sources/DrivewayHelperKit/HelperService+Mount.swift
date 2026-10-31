@@ -62,12 +62,7 @@ extension HelperService {
     func fixAndMount(_ d: DiskDescription, _ ctx: Context) async -> HelperResponse {
         guard await filesystem(of: d) == .ntfs else { return .error(.commandFailed("Fix & mount is only for NTFS drives.")) }
         let wasMounted = d.volumePath != nil || mounts[d.bsdName] != nil
-        if wasMounted {
-            if case .failure(let e) = await runOK(ToolCommands.unmount(device: "/dev/\(d.bsdName)", paths: paths)) {
-                return .error(e)
-            }
-            forget(d.bsdName)
-        }
+        if let e = await unmountForRawAccess(d) { return .error(e) }
         let fix = ToolCommands.ntfsfix(device: "/dev/\(d.bsdName)", mode: .repair, paths: paths)
         if case .failure(let e) = await runOK(fix, unbounded: true) {
             if wasMounted, case .failure(let mountError) = await handBackToMacOS(d.bsdName) {
@@ -136,12 +131,7 @@ extension HelperService {
         _ d: DiskDescription, _ ctx: Context, _ command: Command
     ) async -> (Result<CommandResult, HelperError>, String?) {
         let wasMounted = d.volumePath != nil || mounts[d.bsdName] != nil
-        if wasMounted {
-            if case .failure(let e) = await runOK(ToolCommands.unmount(device: "/dev/\(d.bsdName)", paths: paths)) {
-                return (.failure(e), nil)
-            }
-            forget(d.bsdName)
-        }
+        if let e = await unmountForRawAccess(d) { return (.failure(e), nil) }
         let result = await run(command, unbounded: true)
         guard wasMounted else { return (result, nil) }
         var unmounted = d
@@ -149,6 +139,25 @@ extension HelperService {
         guard case .failure(let f) = await mountOutcome(unmounted, ctx) else { return (result, nil) }
         return (result, Self.remountNote(f))
     }
+
+    /// Unmounts `d` if it is mounted, then makes sure nothing is mounted from its device any more: ntfsfix,
+    /// e2fsck and ntfsclone must never work on a mounted volume's raw device. Nil when the device is free.
+    func unmountForRawAccess(_ d: DiskDescription) async -> HelperError? {
+        let device = "/dev/\(d.bsdName)"
+        let mountPoints = [d.volumePath, mounts[d.bsdName]?.mountPoint].compactMap { $0 }
+        let wasMounted = d.volumePath != nil || mounts[d.bsdName] != nil
+        if wasMounted, case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) {
+            return e
+        }
+        if await inventory.isStillMounted(device: device, mountPoints: mountPoints) {
+            return .commandFailed(Self.stillMountedMessage)
+        }
+        if wasMounted { forget(d.bsdName) }
+        return nil
+    }
+
+    static let stillMountedMessage =
+        "The drive is still mounted after unmounting it, so nothing was run on it. Close any files open on it and try again."
 
     static func remountNote(_ f: MountFailure) -> String {
         f.readOnlyByMacOS

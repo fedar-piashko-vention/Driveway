@@ -90,6 +90,8 @@ final class FakeInventory: DiskInventoryProviding {
         var headerReads: [String] = []
         var mountChecks: [String] = []
         var readOnlyMounts: Set<String> = []
+        /// Devices and mount points that stay in the mount table whatever is unmounted.
+        var stuck: Set<String> = []
     }
     private let state: Mutex<State>
 
@@ -100,6 +102,7 @@ final class FakeInventory: DiskInventoryProviding {
     func setDisks(_ disks: [DiskDescription]) { state.withLock { $0.disks = disks } }
     func setBoot(_ boot: Set<String>) { state.withLock { $0.boot = boot } }
     func setReadOnlyMounts(_ paths: Set<String>) { state.withLock { $0.readOnlyMounts = paths } }
+    func setStuck(_ entries: Set<String>) { state.withLock { $0.stuck = entries } }
     var headerReads: [String] { state.withLock { $0.headerReads } }
     var mountChecks: [String] { state.withLock { $0.mountChecks } }
 
@@ -125,6 +128,10 @@ final class FakeInventory: DiskInventoryProviding {
 
     func mountIsReadOnly(_ mountPoint: String) -> Bool? {
         state.withLock { $0.readOnlyMounts.contains(mountPoint) }
+    }
+
+    func isStillMounted(device: String, mountPoints: [String]) async -> Bool {
+        state.withLock { s in s.stuck.contains(device) || mountPoints.contains(where: s.stuck.contains) }
     }
 }
 

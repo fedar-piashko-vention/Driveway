@@ -139,6 +139,20 @@ public final class DADiskInventory: DiskInventoryProviding, @unchecked Sendable 
         }
     }
 
+    /// Polls the mount table every 250 ms for up to 2 seconds. A FUSE mount's "from" name is its `fsname`, which
+    /// Driveway sets to the device for ntfs-3g and ext4fuse.
+    public func isStillMounted(device: String, mountPoints: [String]) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while true {
+            let present = Self.mountEntries().contains { entry in
+                Self.string(fromMountName: entry.f_mntfromname) == device
+                    || mountPoints.contains(Self.string(fromMountName: entry.f_mntonname))
+            }
+            guard present, ContinuousClock.now < deadline else { return present }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     public func mountIsReadOnly(_ mountPoint: String) -> Bool? {
         Self.mountEntry(at: mountPoint).map { $0.f_flags & UInt32(MNT_RDONLY) != 0 }
     }
@@ -147,17 +161,20 @@ public final class DADiskInventory: DiskInventoryProviding, @unchecked Sendable 
     /// doesn't ask the filesystems anything (a stuck FUSE daemon can't block it) and, unlike `getmntinfo`,
     /// uses a buffer of its own.
     static func mountEntry(at mountPoint: String) -> statfs? {
+        mountEntries().first { string(fromMountName: $0.f_mntonname) == mountPoint }
+    }
+
+    /// Every mount table entry, from `getfsstat` with MNT_NOWAIT.
+    static func mountEntries() -> [statfs] {
         let count = getfsstat(nil, 0, MNT_NOWAIT)
-        guard count > 0 else { return nil }
+        guard count > 0 else { return [] }
         // Room for mounts that appear between the two calls.
         let capacity = Int(count) + 16
         let entries = UnsafeMutablePointer<statfs>.allocate(capacity: capacity)
         defer { entries.deallocate() }
         let filled = getfsstat(entries, Int32(capacity * MemoryLayout<statfs>.stride), MNT_NOWAIT)
-        guard filled > 0 else { return nil }
-        return UnsafeBufferPointer(start: entries, count: Int(filled)).first {
-            string(fromMountName: $0.f_mntonname) == mountPoint
-        }
+        guard filled > 0 else { return [] }
+        return Array(UnsafeBufferPointer(start: entries, count: Int(filled)))
     }
 
     static func string<T>(fromMountName tuple: T) -> String {

@@ -22,11 +22,13 @@ public enum ToolCommands {
             arguments: [device, mountPoint, "-o", backendPrefix(backend) + options])
     }
 
-    /// ext4fuse mount (read-only by nature; needs no uid/gid). Options: `[backend=fskit,]volname=<label>`.
+    /// ext4fuse mount (read-only by nature; needs no uid/gid).
+    /// Options: `[backend=fskit,]volname=<label>,allow_other,fsname=<device>`. ntfs-3g adds `allow_other` and
+    /// `fsname` itself; ext4fuse doesn't, and without `allow_other` a mount made by root is closed to the user.
     public static func ext4fuseMount(
         device: String, mountPoint: String, volumeName: String, backend: MountBackend, paths: ToolPaths
     ) -> Command {
-        let options = "volname=\(MountNaming.fuseOptionEscaped(volumeName))"
+        let options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),allow_other,fsname=\(MountNaming.fuseOptionEscaped(device))"
         return Command(
             executable: paths.ext4fuse,
             arguments: [device, mountPoint, "-o", backendPrefix(backend) + options])
