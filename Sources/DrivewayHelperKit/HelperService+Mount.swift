@@ -71,6 +71,8 @@ extension HelperService {
             }
             return .error(e)
         }
+        // ntfsfix cleared the dirty flag: whatever the mount does next, the drive isn't known to be dirty now.
+        notes[d.bsdName] = nil
         var unmounted = d
         unmounted.volumePath = nil
         return await mount(unmounted, ctx, knownFilesystem: .ntfs)

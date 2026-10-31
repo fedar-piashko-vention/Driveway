@@ -1218,3 +1218,16 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     // An existing file is replaced: the save panel already asked.
     #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: existing), authorization: auth) == .ok)
 }
+
+@Test func fixedDriveIsNoLongerShownDirtyWhenTheMountFails() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(ntfs3g, "/dev/disk4s1", exit: 15)
+    guard case .mountedReadOnly(_, .dirty) = await h.service.diskAppeared(d) else { Issue.record("expected dirty"); return }
+    h.runner.script(tools.ntfsfix, "-d", exit: 0, stdout: ntfsfixOK)
+    h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
+    _ = await h.service.handle(.fixAndMount(ref("disk4s1")), authorization: auth)
+    guard case .volumes(let list) = await h.service.handle(.listVolumes, authorization: nil) else { Issue.record("expected volumes"); return }
+    #expect(list.first?.health == .unknown)  // ntfsfix cleared the dirty flag
+    #expect(list.first?.lastError == "\(ntfs3g) is not installed.")
+}
