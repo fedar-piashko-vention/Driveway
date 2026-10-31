@@ -52,9 +52,8 @@ To remove it by hand, in Terminal:
 launchctl bootout "gui/$(id -u)/app.driveway.agent"
 sudo launchctl bootout system/app.driveway.helper
 sudo rm -f /Library/LaunchAgents/app.driveway.agent.plist \
-           /Library/LaunchDaemons/app.driveway.helper.plist \
-           /Library/PrivilegedHelperTools/app.driveway.helper
-sudo rm -rf /Library/Logs/Driveway
+           /Library/LaunchDaemons/app.driveway.helper.plist
+sudo rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app /Library/Logs/Driveway
 sudo chown -R "$USER" /Applications/Driveway.app   # the helper's install made it root's
 ```
 

@@ -16,7 +16,7 @@
 		<true/>
 	</dict>
 	<key>Program</key>
-	<string>/Library/PrivilegedHelperTools/app.driveway.helper</string>
+	<string>/Library/PrivilegedHelperTools/app.driveway.helper.app/Contents/MacOS/app.driveway.helper</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
