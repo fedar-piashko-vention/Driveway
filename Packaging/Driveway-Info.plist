@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.4</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Driveway opens a Terminal window to install macFUSE with Homebrew.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundleURLTypes</key>
