@@ -29,6 +29,8 @@ final class HelperClient: @unchecked Sendable {
     private let logger = Logger(subsystem: "app.driveway.Driveway", category: "helper")
     /// The current connection; nil before `connect()` and while waiting to reconnect.
     private let connection = Mutex<NSXPCConnection?>(nil)
+    /// True while a re-registration after an interruption waits out the back-off.
+    private let registerPending = Mutex(false)
 
     init() {
         let (events, continuation) = AsyncStream<VolumeEvent>.makeStream()
@@ -93,10 +95,10 @@ final class HelperClient: @unchecked Sendable {
         connection.remoteObjectInterface = NSXPCInterface(with: DrivewayHelperXPC.self)
         connection.exportedInterface = NSXPCInterface(with: DrivewayEventsXPC.self)
         connection.exportedObject = receiver
-        // The helper restarted: this connection object is still usable, so just register again.
-        connection.interruptionHandler = { [weak self, weak connection] in
-            guard let self, let connection else { return }
-            self.register(connection)
+        // The helper restarted, or refused this app: the connection object is still usable, so register again
+        // after the back-off.
+        connection.interruptionHandler = { [weak self] in
+            self?.registerAfterBackoff()
         }
         connection.invalidationHandler = { [weak self, weak connection] in
             guard let self, let connection else { return }
@@ -114,6 +116,24 @@ final class HelperClient: @unchecked Sendable {
             }
         }
         return connection
+    }
+
+    /// A refusal arrives as an interruption, and the helper may never accept this copy of the app (for example once
+    /// Driveway was replaced on disk while it runs). Registering again at once would then spin, so wait first, with
+    /// at most one re-registration pending.
+    private func registerAfterBackoff() {
+        let alreadyPending = registerPending.withLock { pending in
+            defer { pending = true }
+            return pending
+        }
+        guard !alreadyPending else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.backoff)
+            guard let self else { return }
+            self.registerPending.withLock { $0 = false }
+            // An interrupted connection stays current; an invalidated one has been replaced (and registered).
+            if let current = self.connection.withLock({ $0 }) { self.register(current) }
+        }
     }
 
     private func register(_ connection: NSXPCConnection) {

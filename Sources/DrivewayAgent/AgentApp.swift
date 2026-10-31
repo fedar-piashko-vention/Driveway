@@ -140,6 +140,8 @@ final class HelperLink {
     private let logger: Logger
     private let receiver: EventReceiver
     private var connection: NSXPCConnection?
+    /// True while a re-registration after an interruption waits out the back-off.
+    private var registerPending = false
 
     init(logger: Logger, onEvent: @escaping @MainActor (VolumeEvent) -> Void) {
         self.logger = logger
@@ -151,9 +153,10 @@ final class HelperLink {
         connection.remoteObjectInterface = NSXPCInterface(with: DrivewayHelperXPC.self)
         connection.exportedInterface = NSXPCInterface(with: DrivewayEventsXPC.self)
         connection.exportedObject = receiver
-        // The helper restarted: this connection object is still usable, so just register again.
+        // The helper restarted, or refused this agent: the connection object is still usable, so register again
+        // after the back-off.
         connection.interruptionHandler = { [weak self] in
-            Task { @MainActor in self?.register() }
+            Task { @MainActor in self?.registerAfterBackoff() }
         }
         connection.invalidationHandler = { [weak self, weak connection] in
             Task { @MainActor in
@@ -167,6 +170,20 @@ final class HelperLink {
         self.connection = connection
         connection.resume()
         register()
+    }
+
+    /// A refusal arrives as an interruption, and the helper may never accept this copy (for example once Driveway was
+    /// replaced on disk while the agent runs). Registering again at once would then spin, so wait first, with at most
+    /// one re-registration pending.
+    private func registerAfterBackoff() {
+        guard !registerPending else { return }
+        registerPending = true
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.backoff)
+            guard let self else { return }
+            self.registerPending = false
+            self.register()
+        }
     }
 
     private func register() {
