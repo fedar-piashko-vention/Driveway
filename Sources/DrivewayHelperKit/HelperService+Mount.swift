@@ -54,13 +54,23 @@ extension HelperService {
         var failure: HelperError?
         if case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) { failure = e }
         guard await inventory.isStillMounted(device: device, mountPoints: mountPoints) else { return nil }
-        if let own = mounts[d.bsdName]?.mountPoint,
-           case .failure(let e) = await runOK(ToolCommands.umount(mountPoint: own, paths: paths))
-        {
-            failure = failure ?? e
+        if let own = mounts[d.bsdName] {
+            // umount's error explains more than diskutil's "already unmounted".
+            if let mountPoint = own.mountPoint,
+               case .failure(let e) = await runOK(ToolCommands.umount(mountPoint: mountPoint, paths: paths))
+            {
+                failure = e
+                if own.access == .readOnly,
+                   case .failure(let forced) = await runOK(ToolCommands.umount(mountPoint: mountPoint, force: true, paths: paths))
+                {
+                    failure = forced
+                }
+            }
         }
         guard await inventory.isStillMounted(device: device, mountPoints: mountPoints) else { return nil }
-        return failure ?? .commandFailed(Self.stillMountedMessage)
+        let error = failure ?? .commandFailed(Self.stillMountedMessage)
+        log("Couldn't unmount \(d.bsdName): \(Self.text(error))")
+        return error
     }
 
     func eject(_ d: DiskDescription) async -> HelperResponse {
@@ -77,6 +87,7 @@ extension HelperService {
             if let e = await unmountVolume(own) { return .error(e) }
         }
         if case .failure(let e) = await runOK(ToolCommands.diskutil("eject", "/dev/\(d.wholeDisk)", paths: paths)) {
+            log("Couldn't eject \(d.wholeDisk): \(Self.text(e))")
             return .error(e)
         }
         for (bsd, v) in mounts where v.wholeDisk == d.wholeDisk { forget(bsd) }

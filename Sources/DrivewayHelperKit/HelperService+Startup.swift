@@ -33,7 +33,8 @@ extension HelperService {
                 let mountPoint = d.volumePath ?? entry?.mountPoint
             else { continue }
             let fs = await filesystem(of: d) ?? .other
-            let readOnly = inventory.mountIsReadOnly(mountPoint) ?? !(fs == .ntfs)
+            // ext4fuse only reads, though its mounts don't carry the read-only flag.
+            let readOnly = fs != .ntfs || (inventory.mountIsReadOnly(mountPoint) ?? false)
             var v = describe(d, fs)
             v.mountPoint = mountPoint
             v.access = readOnly ? .readOnly : .readWrite
