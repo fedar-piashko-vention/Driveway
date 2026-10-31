@@ -1231,3 +1231,21 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(list.first?.health == .unknown)  // ntfsfix cleared the dirty flag
     #expect(list.first?.lastError == "\(ntfs3g) is not installed.")
 }
+
+@Test func readOnlyFallbackThatWontUnmountIsKeptAndTracked() async {
+    // diskutil reports success, yet the FUSE mount stays: Driveway keeps tracking its read-only mount
+    // instead of letting macOS mount the drive a second time.
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(ntfs3g, "/dev/disk4s1", exit: 0, stderr: "Windows is hibernated, refused to mount.\n")
+    h.inventory.setReadOnlyMounts(["/Volumes/BACKUP"])
+    h.inventory.setStuck(["/dev/disk4s1"])
+    let event = await h.service.diskAppeared(d)
+    guard case .mountedReadOnly(let v, .hibernated) = event else {
+        Issue.record("expected hibernated .mountedReadOnly, got \(String(describing: event))")
+        return
+    }
+    #expect(v.mountedBy == .driveway)
+    #expect(v.access == .readOnly)
+    #expect(!h.runner.commands.contains(cmd(diskutil, "mount", "/dev/disk4s1")))
+}

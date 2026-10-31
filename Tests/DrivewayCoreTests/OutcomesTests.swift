@@ -18,9 +18,8 @@ import Testing
 }
 
 @Test func ntfs3gStderrPatternsAreCaseInsensitive() {
-    #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "WINDOWS CACHE") == .hibernated)
-    #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "Windows is hibernated") == .hibernated)
-    #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "Fast Restart is enabled") == .hibernated)
+    #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "METADATA KEPT IN WINDOWS CACHE") == .hibernated)
+    #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "WINDOWS IS HIBERNATED, refused to mount.") == .hibernated)
     #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "Volume is UNCLEAN") == .dirty)
     #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: "Scheduled For Check") == .dirty)
 }
@@ -106,12 +105,27 @@ private let hibernatedFallback = """
 @Test func successfulMountThatFellBackToReadOnly() {
     #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: hibernatedFallback) == .hibernated)
     #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "Metadata kept in Windows cache") == .hibernated)
-    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "Fast Restart is on") == .hibernated)
     #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "The file system wasn't safely closed on Windows.") == .dirty)
     // A read-only mount nobody asked for, whatever the output says: not clean, so treated as unclean.
     #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "") == .dirty)
     // The mount table can't tell, but the output says it fell back.
     #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: nil, output: "Falling back to read-only mount because the NTFS partition is in an unsafe state") == .dirty)
     #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: false, output: "Volume was not unmounted properly") == .dirty)
-    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: false, output: "HIBERNATED") == .hibernated)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: false, output: "Hibernated non-system partition, refused to mount.") == .hibernated)
+}
+
+/// ntfs-3g prints the same fallback sentence, with "no hibernation or fast restarting", for every read-only
+/// fallback. An unclean volume must stay `.dirty` (it gets Fix & mount), not be taken for a hibernated one.
+private let uncleanFallback = """
+    The disk contains an unclean file system (0, 0).
+    Falling back to read-only mount because the NTFS partition is in an
+    unsafe state. Please resume and shutdown Windows fully (no hibernation
+    or fast restarting.)
+    """
+
+@Test func uncleanFallbackWithNtfs3gsGenericSentenceIsDirty() {
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: uncleanFallback) == .dirty)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: nil, output: uncleanFallback) == .dirty)
+    #expect(NTFSMountOutcome.classify(exitCode: 1, stderr: uncleanFallback) == .dirty)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "Fast Restart is on") == .dirty)
 }

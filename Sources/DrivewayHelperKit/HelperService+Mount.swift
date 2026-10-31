@@ -266,6 +266,12 @@ extension HelperService {
                         if case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) {
                             return keepReadOnlyMount(v, d, fs, mountPoint: mountPoint, backend: backend, outcome: outcome, unmountError: e)
                         }
+                        // diskutil can report success while a FUSE mount stays; macOS mounting it as well would
+                        // leave Driveway's read-only mount orphaned and untracked.
+                        if await inventory.isStillMounted(device: device, mountPoints: [mountPoint]) {
+                            let e = HelperError.commandFailed("Driveway's read-only mount of this drive didn't go away.")
+                            return keepReadOnlyMount(v, d, fs, mountPoint: mountPoint, backend: backend, outcome: outcome, unmountError: e)
+                        }
                         return await fallBackToMacOS(d, fs, v, outcome: outcome, result: result, command: command)
                     }
                 }

@@ -54,10 +54,10 @@ main() {
     local LOG_DIR="/Library/Logs/Driveway"
 
     # The helper only trusts callers from a root-owned, non-group/other-writable bundle.
-    # ACLs could still grant others write access, so they are stripped too (BSD chmod -N; with -R,
-    # symlinks inside the bundle are not followed).
+    # ACLs could still grant others write access, so they are stripped too. `chmod -R -N` would follow
+    # symlinks out of the bundle (and stop at a dangling one), so only non-symlinks are touched.
     chown -R root:wheel "${APP}"
-    chmod -R -N "${APP}"
+    find "${APP}" ! -type l -exec chmod -N {} +
     chmod -R go-w "${APP}"
     if [[ "$(stat -f %u "${HELPER_SRC}")" != "0" ]]; then
         echo "${HELPER_SRC} is not root-owned after chown; aborting." >&2
