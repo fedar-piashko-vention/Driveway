@@ -17,13 +17,16 @@ check_app_paths() {
         return 64
     fi
     for d in "${app}/Contents" "${app}/Contents/Library" \
-             "${app}/Contents/Library/LaunchServices" "${app}/Contents/Resources"; do
+             "${app}/Contents/Library/LaunchServices" "${app}/Contents/Resources" \
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app" \
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents" \
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS"; do
         if [[ ! -d "${d}" || -L "${d}" ]]; then
             echo "${d} is missing or a symlink." >&2
             return 64
         fi
     done
-    for d in "${app}/Contents/Library/LaunchServices/app.driveway.helper" \
+    for d in "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS/app.driveway.helper" \
              "${app}/Contents/Resources/app.driveway.helper.plist" \
              "${app}/Contents/Resources/app.driveway.agent.plist"; do
         if [[ ! -f "${d}" || -L "${d}" ]]; then
