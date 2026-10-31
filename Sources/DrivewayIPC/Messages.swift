@@ -61,3 +61,14 @@ public enum VolumeEvent: Codable, Equatable, Sendable {
     case mountFailed(Volume, message: String)
     case removed(bsdName: String)
 }
+
+extension ReadOnlyReason {
+    /// The `VolumeHealth` and error text that `NotificationContent.readOnly` takes for this reason.
+    public var healthAndError: (health: VolumeHealth, error: String?) {
+        switch self {
+        case .dirty: (.dirty, nil)
+        case .hibernated: (.hibernated, nil)
+        case .error(let message): (.unknown, message)
+        }
+    }
+}
