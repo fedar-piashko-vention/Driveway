@@ -96,7 +96,9 @@ main() {
     chmod -R go-w "${HELPER_DST}.new"
     mv "${HELPER_DST}.new" "${HELPER_DST}"
     # Staged as driveway_ext.fs.new, which diskarbitrationd ignores (no .fs suffix), then moved into place.
-    install -d -o root -g wheel -m 755 /Library/Filesystems
+    # /Library/Filesystems normally exists and is SIP-protected, so only create it when it's missing:
+    # install -d on the existing folder warns that it can't chown it.
+    [[ -d /Library/Filesystems ]] || install -d -o root -g wheel -m 755 /Library/Filesystems
     rm -rf "${EXT_FS_DST}.new"
     ditto "${EXT_FS_SRC}" "${EXT_FS_DST}.new"
     chown -R root:wheel "${EXT_FS_DST}.new"
