@@ -1,11 +1,28 @@
 // Renders Driveway's app icon (1024×1024 PNG) from the gradient in Packaging/Icon/gradient-source.png.
-// Usage: swift scripts/make-icon.swift <gradient.png> <out.png>
+// Usage: swift scripts/make-icon.swift <gradient.png> <out.png> [charcoal|navy|white]
 // The shape follows the macOS icon grid: an 824-point rounded square centred on a 1024 canvas.
 import AppKit
 
 let args = CommandLine.arguments
-guard args.count == 3, let gradient = NSImage(contentsOfFile: args[1]) else {
-    FileHandle.standardError.write("usage: make-icon.swift <gradient.png> <out.png>\n".data(using: .utf8)!)
+guard (3...4).contains(args.count), let gradient = NSImage(contentsOfFile: args[1]) else {
+    FileHandle.standardError.write("usage: make-icon.swift <gradient.png> <out.png> [charcoal|navy|white]\n".data(using: .utf8)!)
+    exit(64)
+}
+
+func rgb(_ hex: UInt32) -> NSColor {
+    NSColor(calibratedRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+}
+
+/// The drive's colours: its top, its darker front face, and the line between them.
+struct Glyph { var top: NSColor; var face: NSColor; var seam: NSColor }
+let glyphs: [String: Glyph] = [
+    "charcoal": Glyph(top: rgb(0x2E2E33), face: rgb(0x222226), seam: rgb(0x46464D)),
+    "navy": Glyph(top: rgb(0x1E2D4A), face: rgb(0x16223A), seam: rgb(0x34476B)),
+    "white": Glyph(top: .white, face: rgb(0xF2EDE6), seam: rgb(0xF7D9B4)),
+]
+guard let glyph = glyphs[args.count == 4 ? args[3] : "navy"] else {
+    FileHandle.standardError.write("glyph colour must be charcoal, navy or white\n".data(using: .utf8)!)
     exit(64)
 }
 
@@ -48,7 +65,7 @@ NSGradient(colors: [NSColor.white.withAlphaComponent(0.22), NSColor.white.withAl
     .draw(in: NSRect(x: tile.minX, y: tile.midY, width: tile.width, height: tile.height / 2), angle: -90)
 NSGraphicsContext.restoreGraphicsState()
 
-// The drive: a white body with a slot line and an orange status light.
+// The drive: a dark (or white) body with a front face, a seam and an orange status light.
 let body = NSRect(x: 512 - 280, y: 512 - 150, width: 560, height: 300)
 let bodyPath = NSBezierPath(roundedRect: body, xRadius: 72, yRadius: 72)
 NSGraphicsContext.saveGraphicsState()
@@ -57,21 +74,21 @@ glyphShadow.shadowOffset = NSSize(width: 0, height: -14)
 glyphShadow.shadowBlurRadius = 34
 glyphShadow.shadowColor = NSColor(calibratedRed: 0.45, green: 0.18, blue: 0.0, alpha: 0.40)
 glyphShadow.set()
-NSColor.white.setFill()
+glyph.top.setFill()
 bodyPath.fill()
 NSGraphicsContext.restoreGraphicsState()
 
 NSGraphicsContext.saveGraphicsState()
 bodyPath.addClip()
 // The lower face, a shade darker, like the front of an external drive.
-NSColor(calibratedRed: 0.95, green: 0.93, blue: 0.90, alpha: 1).setFill()
+glyph.face.setFill()
 NSRect(x: body.minX, y: body.minY, width: body.width, height: 118).fill()
-NSColor(calibratedRed: 0.88, green: 0.52, blue: 0.16, alpha: 0.35).setFill()
+glyph.seam.setFill()
 NSRect(x: body.minX, y: body.minY + 118, width: body.width, height: 8).fill()
 NSGraphicsContext.restoreGraphicsState()
 
 let led = NSRect(x: body.maxX - 112, y: body.minY + 38, width: 44, height: 44)
-NSColor(calibratedRed: 0.91, green: 0.45, blue: 0.10, alpha: 1).setFill()
+rgb(0xF29A2E).setFill()
 NSBezierPath(ovalIn: led).fill()
 
 NSGraphicsContext.restoreGraphicsState()

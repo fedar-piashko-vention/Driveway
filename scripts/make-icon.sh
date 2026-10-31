@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-swift scripts/make-icon.swift Packaging/Icon/gradient-source.png Packaging/Icon/Driveway-1024.png
+swift scripts/make-icon.swift Packaging/Icon/gradient-source.png Packaging/Icon/Driveway-1024.png navy
 SET="$WORK/Driveway.iconset"
 mkdir "$SET"
 for pt in 16 32 128 256 512; do
