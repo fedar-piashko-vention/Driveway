@@ -52,3 +52,45 @@ public enum VolumeList {
         return bsd
     }
 }
+
+/// Decides whether a refresh's replies may replace the model's state. A refresh is slow next to the events and
+/// setting changes that arrive while it runs, so its volume list is dropped if an event was applied meanwhile, and its
+/// settings are dropped if a settings write started or finished meanwhile, or is still pending.
+public struct RefreshGate: Sendable {
+    public struct Token: Equatable, Sendable {
+        fileprivate let volumes: Int
+        fileprivate let settings: Int
+    }
+
+    private var volumesGeneration = 0
+    private var settingsGeneration = 0
+    private var pendingSettingsWrites = 0
+
+    public init() {}
+
+    public func beginRefresh() -> Token {
+        Token(volumes: volumesGeneration, settings: settingsGeneration)
+    }
+
+    public mutating func eventApplied() {
+        volumesGeneration += 1
+    }
+
+    public mutating func settingsWriteStarted() {
+        settingsGeneration += 1
+        pendingSettingsWrites += 1
+    }
+
+    public mutating func settingsWriteFinished() {
+        settingsGeneration += 1
+        pendingSettingsWrites = max(0, pendingSettingsWrites - 1)
+    }
+
+    public func acceptsVolumes(from token: Token) -> Bool {
+        token.volumes == volumesGeneration
+    }
+
+    public func acceptsSettings(from token: Token) -> Bool {
+        pendingSettingsWrites == 0 && token.settings == settingsGeneration
+    }
+}

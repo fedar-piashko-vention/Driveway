@@ -22,6 +22,9 @@ final class DiskManagerModel {
 
     @ObservationIgnored private let client: HelperClient
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
+    @ObservationIgnored private var gate = RefreshGate()
+    /// The one pending refresh after the helper was unreachable.
+    @ObservationIgnored private var retryTask: Task<Void, Never>?
     @ObservationIgnored private let logger = Logger(subsystem: "app.driveway.Driveway", category: "model")
 
     init(client: HelperClient = HelperClient()) {
@@ -44,23 +47,29 @@ final class DiskManagerModel {
         }
     }
 
+    /// Reloads the volume list and settings. A reply that events or settings changes have overtaken is dropped.
     func refresh() async {
+        let token = gate.beginRefresh()
         guard let listed = await perform(.listVolumes) else { return }
         if case .volumes(let volumes) = listed {
-            self.volumes = volumes
+            if gate.acceptsVolumes(from: token) { self.volumes = volumes }
         } else {
             unexpected(listed, for: .listVolumes)
         }
         guard let fetched = await perform(.getSettings) else { return }
         if case .settings(let settings) = fetched {
-            self.settings = settings
-            settingsLoaded = true
+            if gate.acceptsSettings(from: token) {
+                self.settings = settings
+                settingsLoaded = true
+            }
         } else {
             unexpected(fetched, for: .getSettings)
         }
     }
 
     func apply(_ e: VolumeEvent) {
+        gate.eventApplied()
+        helperReachable = true
         volumes = e.applied(to: volumes)
     }
 
@@ -87,7 +96,7 @@ final class DiskManagerModel {
         let key = volume.settingsKey
         guard settingsLoaded, settings.alwaysReadOnly.contains(key) != on else { return }
         setKey(key, on)
-        if await perform(.setSettings(settings)) == nil {
+        if await saveSettings() == false {
             setKey(key, !on)
         }
     }
@@ -95,12 +104,30 @@ final class DiskManagerModel {
     func setAutoMountNTFS(_ on: Bool) async {
         guard settingsLoaded, settings.autoMountNTFS != on else { return }
         settings.autoMountNTFS = on
-        if await perform(.setSettings(settings)) == nil {
+        if await saveSettings() == false {
             settings.autoMountNTFS = !on
         }
     }
 
     // MARK: - Private
+
+    /// Sends the current settings. While this runs, and after it, refreshes started earlier don't replace them.
+    private func saveSettings() async -> Bool {
+        gate.settingsWriteStarted()
+        defer { gate.settingsWriteFinished() }
+        return await perform(.setSettings(settings)) != nil
+    }
+
+    /// Tries `refresh()` again once the client's reconnect back-off has passed. At most one retry is pending.
+    private func scheduleRetry() {
+        guard retryTask == nil else { return }
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: HelperClient.backoff)
+            guard let self else { return }
+            self.retryTask = nil
+            await self.refresh()
+        }
+    }
 
     private func setKey(_ key: String, _ on: Bool) {
         if on { settings.alwaysReadOnly.insert(key) } else { settings.alwaysReadOnly.remove(key) }
@@ -123,6 +150,7 @@ final class DiskManagerModel {
         } catch HelperClientError.unreachable(let detail) {
             logger.notice("The helper is unreachable: \(detail, privacy: .public)")
             helperReachable = false
+            scheduleRetry()
             return nil
         } catch AuthorizerError.canceled {
             return nil
