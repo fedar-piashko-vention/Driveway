@@ -23,8 +23,14 @@ extension HelperService {
     public func adoptExistingMounts() async {
         guard let ctx = await context() else { return }
         for d in ctx.disks where Self.isValidBSDName(d.bsdName) {
-            guard let mountPoint = d.volumePath, let backend = Self.ownBackend(forVolumeKind: d.volumeKind),
-                  mounts[d.bsdName] == nil, !ctx.policy.isProtected(d, allDisks: ctx.disks)
+            guard mounts[d.bsdName] == nil, !ctx.policy.isProtected(d, allDisks: ctx.disks) else { continue }
+            // DiskArbitration's volume kind is no proof of ownership: for an NTFS partition it says "ntfs" (Apple's
+            // probe recognised it) even when ntfs-3g mounted it, and for ext it knows no mount at all. The mount
+            // table's filesystem type ("macfuse") is.
+            let entry = inventory.mountEntry(fromDevice: "/dev/\(d.bsdName)")
+            guard let backend = Self.ownBackend(forVolumeKind: d.volumeKind)
+                ?? entry.flatMap({ Self.ownBackend(forVolumeKind: $0.type) }),
+                let mountPoint = d.volumePath ?? entry?.mountPoint
             else { continue }
             let fs = await filesystem(of: d) ?? .other
             let readOnly = inventory.mountIsReadOnly(mountPoint) ?? !(fs == .ntfs)

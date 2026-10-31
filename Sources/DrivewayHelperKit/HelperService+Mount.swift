@@ -39,11 +39,28 @@ extension HelperService {
 
     func unmount(_ d: DiskDescription) async -> HelperResponse {
         guard d.volumePath != nil || mounts[d.bsdName] != nil else { return .ok }
-        if case .failure(let e) = await runOK(ToolCommands.unmount(device: "/dev/\(d.bsdName)", paths: paths)) {
-            return .error(e)
-        }
+        if let e = await unmountVolume(d) { return .error(e) }
         forget(d.bsdName)
         return .ok
+    }
+
+    /// Unmounts the volume on `d` and confirms it left the mount table. `diskutil unmount` goes through
+    /// DiskArbitration, which doesn't know a FUSE mount it couldn't tie to the disk (ext: macOS has no ext probe, so
+    /// DA calls the volume unmounted and diskutil fails with "already unmounted"). Then the mount point Driveway
+    /// mounted is unmounted with `umount`. Nil when nothing is mounted from the device any more.
+    func unmountVolume(_ d: DiskDescription) async -> HelperError? {
+        let device = "/dev/\(d.bsdName)"
+        let mountPoints = [d.volumePath, mounts[d.bsdName]?.mountPoint].compactMap { $0 }
+        var failure: HelperError?
+        if case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) { failure = e }
+        guard await inventory.isStillMounted(device: device, mountPoints: mountPoints) else { return nil }
+        if let own = mounts[d.bsdName]?.mountPoint,
+           case .failure(let e) = await runOK(ToolCommands.umount(mountPoint: own, paths: paths))
+        {
+            failure = failure ?? e
+        }
+        guard await inventory.isStillMounted(device: device, mountPoints: mountPoints) else { return nil }
+        return failure ?? .commandFailed(Self.stillMountedMessage)
     }
 
     func eject(_ d: DiskDescription) async -> HelperResponse {
@@ -51,6 +68,13 @@ extension HelperService {
         // eject only the whole disk whose queue this operation holds.
         guard Self.isValidBSDName(d.wholeDisk), d.wholeDisk == Self.lockKey(d.bsdName) else {
             return .error(.commandFailed("The drive reported an unexpected disk name. Nothing was ejected."))
+        }
+        // Driveway's own mounts first: DiskArbitration ejects only the volumes it knows, and would leave an ext
+        // mount behind on a disk that's gone.
+        let disks = await inventory.disks()
+        for (bsd, v) in mounts where v.wholeDisk == d.wholeDisk {
+            guard let own = disks.first(where: { $0.bsdName == bsd }) else { continue }
+            if let e = await unmountVolume(own) { return .error(e) }
         }
         if case .failure(let e) = await runOK(ToolCommands.diskutil("eject", "/dev/\(d.wholeDisk)", paths: paths)) {
             return .error(e)
@@ -165,9 +189,7 @@ extension HelperService {
         let device = "/dev/\(d.bsdName)"
         let mountPoints = [d.volumePath, mounts[d.bsdName]?.mountPoint].compactMap { $0 }
         let wasMounted = d.volumePath != nil || mounts[d.bsdName] != nil
-        if wasMounted, case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) {
-            return e
-        }
+        if wasMounted, let e = await unmountVolume(d) { return e }
         if await inventory.isStillMounted(device: device, mountPoints: mountPoints) {
             return .commandFailed(Self.stillMountedMessage)
         }

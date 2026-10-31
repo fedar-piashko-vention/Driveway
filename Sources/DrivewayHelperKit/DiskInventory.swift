@@ -153,6 +153,12 @@ public final class DADiskInventory: DiskInventoryProviding, @unchecked Sendable 
         }
     }
 
+    public func mountEntry(fromDevice device: String) -> MountEntry? {
+        Self.mountEntries().first { Self.string(fromMountName: $0.f_mntfromname) == device }.map {
+            MountEntry(mountPoint: Self.string(fromMountName: $0.f_mntonname), type: Self.string(fromMountName: $0.f_fstypename))
+        }
+    }
+
     public func mountIsReadOnly(_ mountPoint: String) -> Bool? {
         Self.mountEntry(at: mountPoint).map { $0.f_flags & UInt32(MNT_RDONLY) != 0 }
     }

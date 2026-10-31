@@ -109,3 +109,45 @@ import Testing
     #expect(h.runner.commands.isEmpty)
     #expect(h.service.shouldApproveMacOSMount(d))
 }
+
+// Live session: DiskArbitration calls Driveway's NTFS mount "ntfs" (Apple's probe recognised the partition) and
+// knows no mount at all for ext. The mount table's type is what shows the mount is Driveway's.
+
+@Test func adoptsAnNTFSMountThatDiskArbitrationCallsNTFS() async {
+    let ntfs = disk("disk4s1", kind: "ntfs", name: "BACKUP", path: "/Volumes/BACKUP")
+    let h = makeHarness(disks: [ntfs], headers: ["disk4s1": ntfsHeader])
+    h.inventory.setMountEntry(MountEntry(mountPoint: "/Volumes/BACKUP", type: "macfuse"), device: "/dev/disk4s1")
+    await h.service.adoptExistingMounts()
+    guard case .volumes(let volumes) = await h.service.handle(.listVolumes, authorization: nil) else {
+        Issue.record("expected volumes")
+        return
+    }
+    #expect(volumes.first?.mountedBy == .driveway)
+    #expect(volumes.first?.backend == .kernel)
+    #expect(h.runner.commands.isEmpty)
+}
+
+@Test func adoptsAnExtMountDiskArbitrationDoesNotKnow() async {
+    let ext = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")  // no volume path
+    let h = makeHarness(disks: [ext], headers: ["disk6s1": ext4Header])
+    h.inventory.setMountEntry(MountEntry(mountPoint: "/Volumes/LINUX", type: "macfuse"), device: "/dev/disk6s1")
+    await h.service.adoptExistingMounts()
+    guard case .volumes(let volumes) = await h.service.handle(.listVolumes, authorization: nil) else {
+        Issue.record("expected volumes")
+        return
+    }
+    #expect(volumes.first?.mountedBy == .driveway)
+    #expect(volumes.first?.mountPoint == "/Volumes/LINUX")
+}
+
+@Test func doesNotAdoptMacOSsOwnNTFSMount() async {
+    let ntfs = disk("disk4s1", kind: "ntfs", name: "BACKUP", path: "/Volumes/BACKUP")
+    let h = makeHarness(disks: [ntfs], headers: ["disk4s1": ntfsHeader])
+    h.inventory.setMountEntry(MountEntry(mountPoint: "/Volumes/BACKUP", type: "ntfs"), device: "/dev/disk4s1")
+    await h.service.adoptExistingMounts()
+    guard case .volumes(let volumes) = await h.service.handle(.listVolumes, authorization: nil) else {
+        Issue.record("expected volumes")
+        return
+    }
+    #expect(volumes.first?.mountedBy != .driveway)
+}

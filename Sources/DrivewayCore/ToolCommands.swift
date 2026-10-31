@@ -93,6 +93,12 @@ public enum ToolCommands {
         Command(executable: paths.diskutil, arguments: ["unmount", device])
     }
 
+    /// `umount <mount point>`, for a FUSE mount DiskArbitration doesn't know about: macOS can't recognise ext,
+    /// so `diskutil unmount` answers "already unmounted" while ext4fuse's mount is still there.
+    public static func umount(mountPoint: String, paths: ToolPaths) -> Command {
+        Command(executable: paths.umount, arguments: [mountPoint])
+    }
+
     private static func backendPrefix(_ backend: MountBackend) -> String {
         backend == .fskit ? "backend=fskit," : ""
     }

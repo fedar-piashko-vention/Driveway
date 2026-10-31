@@ -1268,3 +1268,54 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     let (_, response) = await (appeared, fixed)
     #expect(response != .error(.notAuthorized))
 }
+
+// MARK: - Live session: FUSE mounts DiskArbitration doesn't know (ext)
+
+/// An ext drive Driveway mounted, which DiskArbitration doesn't tie to the disk: `diskutil unmount` answers
+/// "already unmounted" while the mount stays, until `umount` on the mount point removes it.
+private func extMountedOutsideDA() async -> Harness {
+    let d = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
+    let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header])
+    _ = await h.service.diskAppeared(d)
+    h.runner.script(diskutil, "unmount", exit: 1, stderr: "disk6s1 was already unmounted\n")
+    h.inventory.setStuck(["/Volumes/LINUX"])
+    let inventory = h.inventory
+    h.runner.onRun { c in
+        if c.executable == tools.umount { inventory.setStuck([]) }
+    }
+    return h
+}
+
+@Test func extCheckUnmountsAMountDiskArbitrationDoesNotKnow() async {
+    let h = await extMountedOutsideDA()
+    let response = await h.service.handle(.check(ref("disk6s1")), authorization: nil)
+    guard case .report(let r) = response else { Issue.record("expected a report, got \(response)"); return }
+    #expect(r.filesystem == .ext4)
+    let commands = h.runner.commands
+    let umount = commands.firstIndex(of: cmd(tools.umount, "/Volumes/LINUX"))
+    let fsck = commands.firstIndex(where: { $0.executable == tools.e2fsck })
+    #expect(umount != nil && fsck != nil && umount! < fsck!)
+}
+
+@Test func extEjectUnmountsDrivewaysMountBeforeEjectingTheDisk() async {
+    let h = await extMountedOutsideDA()
+    let response = await h.service.handle(.eject(ref("disk6s1")), authorization: nil)
+    #expect(response == .ok)
+    let commands = h.runner.commands
+    let umount = commands.firstIndex(of: cmd(tools.umount, "/Volumes/LINUX"))
+    let eject = commands.firstIndex(of: cmd(diskutil, "eject", "/dev/disk6"))
+    #expect(umount != nil && eject != nil && umount! < eject!)
+}
+
+@Test func extUnmountFallsBackToUmount() async {
+    let h = await extMountedOutsideDA()
+    #expect(await h.service.handle(.unmount(ref("disk6s1")), authorization: nil) == .ok)
+    #expect(h.runner.commands.contains(cmd(tools.umount, "/Volumes/LINUX")))
+}
+
+@Test func unmountThatLeavesTheMountInPlaceIsAnError() async {
+    let h = await extMountedOutsideDA()
+    h.runner.onRun { _ in }  // umount doesn't remove it either
+    let response = await h.service.handle(.unmount(ref("disk6s1")), authorization: nil)
+    guard case .error = response else { Issue.record("expected an error, got \(response)"); return }
+}
