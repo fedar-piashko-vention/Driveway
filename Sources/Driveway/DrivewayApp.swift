@@ -36,6 +36,7 @@ struct DiskManagerView: View {
             detail
         }
         .frame(minWidth: 640, minHeight: 420)
+        .disabled(model.formatting != nil)
         .overlay {
             // Kept here, not in the Format tab: the erase makes the drive leave the list, which removes the tabs.
             if let formatting = model.formatting { FormatProgressView(formatting: formatting) }
@@ -105,6 +106,7 @@ private struct FormatProgressView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isModal)
     }
 }
 

@@ -140,7 +140,7 @@ final class DiskManagerModel {
 
     /// Erases and formats the drive (or its whole disk). Afterwards the drive's BSD name may have changed, or the
     /// volume may have gone: the list is reloaded, and a selection that no longer exists moves to the new volume on
-    /// the same disk. The caller closes its confirmation sheet when this returns, however it ended.
+    /// the same disk. While it runs, `formatting` is set and the window shows its progress.
     func format(_ request: FormatRequest, volume: Volume) async {
         guard formatting == nil, !busy.contains(volume.bsdName) else { return }
         formatting = FormatInProgress(
