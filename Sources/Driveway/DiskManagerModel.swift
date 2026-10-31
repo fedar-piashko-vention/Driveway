@@ -33,10 +33,10 @@ final class DiskManagerModel {
     private(set) var reports: [String: CheckReport] = [:]
     /// Where the latest backup of each drive was saved, by BSD name.
     private(set) var backups: [String: String] = [:]
-    /// The features the Setup scan found ready. The Format tab only offers the filesystems these make usable.
-    /// Everything counts as ready until the scanner (which fills this in) exists.
     /// The format in flight, if any. Set from the moment it's handed to the model until the list is current again.
     private(set) var formatting: FormatInProgress?
+    /// The features the Setup scan found ready. The Format tab only offers the filesystems these make usable.
+    /// Everything counts as ready until the scanner (which fills this in) exists.
     var readyFeatures: Set<Feature> = Set(Feature.allCases)
 
     @ObservationIgnored private let client: HelperClient
