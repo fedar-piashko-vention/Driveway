@@ -48,7 +48,8 @@ private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
         .mounted(sampleVolume), .mountedReadOnly(sampleVolume, reason: .dirty),
         .mountedReadOnly(sampleVolume, reason: .hibernated), .mountedReadOnly(sampleVolume, reason: .error("x")),
         .backedOff(sampleVolume, driver: "Tuxera NTFS"), .mountFailed(sampleVolume, message: "m"),
-        .removed(bsdName: "disk4s1"),
+        .removed(bsdName: "disk4s1"), .progress(bsdName: "disk4s1", operation: .backup, fraction: 0.4956),
+        .progress(bsdName: "disk6s1", operation: .check, fraction: 0), .progress(bsdName: "disk6s1", operation: .repair, fraction: 1),
     ]
     for e in events { #expect(try roundTrip(e) == e) }
 }

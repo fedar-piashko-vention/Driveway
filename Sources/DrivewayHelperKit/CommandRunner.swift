@@ -16,6 +16,16 @@ public struct CommandResult: Equatable, Sendable {
 
 public protocol CommandRunning: Sendable {
     func run(_ c: Command) async throws -> CommandResult
+    /// Like `run(_:)`, and also hands each line of stdout to `onOutputLine` as it arrives (lines end in a newline
+    /// or a carriage return). The result still carries the whole output.
+    func run(_ c: Command, onOutputLine: @escaping @Sendable (String) -> Void) async throws -> CommandResult
+}
+
+extension CommandRunning {
+    /// Runners that can't stream hand over no lines.
+    public func run(_ c: Command, onOutputLine: @escaping @Sendable (String) -> Void) async throws -> CommandResult {
+        try await run(c)
+    }
 }
 
 public enum CommandRunnerError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -55,6 +65,14 @@ public struct ProcessCommandRunner: CommandRunning {
     }
 
     public func run(_ c: Command) async throws -> CommandResult {
+        try await run(c, lines: nil)
+    }
+
+    public func run(_ c: Command, onOutputLine: @escaping @Sendable (String) -> Void) async throws -> CommandResult {
+        try await run(c, lines: onOutputLine)
+    }
+
+    private func run(_ c: Command, lines: (@Sendable (String) -> Void)?) async throws -> CommandResult {
         guard c.executable.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: c.executable) else {
             throw CommandRunnerError.toolMissing(c.executable)
         }
@@ -68,7 +86,7 @@ public struct ProcessCommandRunner: CommandRunning {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        let stdout = PipeCollector(outPipe.fileHandleForReading)
+        let stdout = PipeCollector(outPipe.fileHandleForReading, lines: lines)
         let stderr = PipeCollector(errPipe.fileHandleForReading)
         let exited = OneShot()
         process.terminationHandler = { _ in exited.fire() }
@@ -132,22 +150,29 @@ final class OneShot: Sendable {
     }
 }
 
-/// Reads a pipe as data arrives, so a tool writing a lot to both stdout and stderr can't block.
+/// Reads a pipe as data arrives, so a tool writing a lot to both stdout and stderr can't block. With `lines`, each
+/// line is also handed over as soon as it is complete.
 final class PipeCollector: Sendable {
     private let handle: FileHandle
     private let data = Mutex(Data())
     private let eof = OneShot()
+    private let splitter = Mutex(OutputLineSplitter())
 
-    init(_ handle: FileHandle) {
+    init(_ handle: FileHandle, lines: (@Sendable (String) -> Void)? = nil) {
         self.handle = handle
-        // The handler keeps the collector alive until end of file or `finish()`.
+        // The handler keeps the collector alive until end of file or `finish()`. It runs on a serial queue, so lines
+        // arrive in order.
         handle.readabilityHandler = { [self] h in
             let chunk = h.availableData
             if chunk.isEmpty {
                 h.readabilityHandler = nil
+                if let lines, let last = splitter.withLock({ $0.finish() }) { lines(last) }
                 eof.fire()
             } else {
                 data.withLock { $0.append(chunk) }
+                if let lines {
+                    for line in splitter.withLock({ $0.lines(in: chunk) }) { lines(line) }
+                }
             }
         }
     }

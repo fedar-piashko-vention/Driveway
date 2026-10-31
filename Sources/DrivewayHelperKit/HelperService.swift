@@ -24,6 +24,8 @@ public actor HelperService {
     /// Told the backend's availability whenever the app asks for it (Setup does, after each step), so the
     /// feature states can be refreshed at once.
     let backendChecked: @Sendable (BackendAvailability) -> Void
+    /// Gets the `.progress` events of a running check, repair or backup, to broadcast to connected clients.
+    let progress: @Sendable (VolumeEvent) -> Void
     let log: @Sendable (String) -> Void
 
     /// Volumes Driveway mounted, by BSD name.
@@ -63,6 +65,7 @@ public actor HelperService {
         consoleUser: @escaping @Sendable () -> ConsoleUser?,
         features: @escaping @Sendable () -> [Feature: FeatureState],
         backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in },
+        progress: @escaping @Sendable (VolumeEvent) -> Void = { _ in },
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.runner = runner
@@ -76,6 +79,7 @@ public actor HelperService {
         self.consoleUser = consoleUser
         self.features = features
         self.backendChecked = backendChecked
+        self.progress = progress
         self.log = log
         let loaded = settings.load()
         shared.withLock { $0.settings = loaded }
@@ -393,14 +397,41 @@ public actor HelperService {
         return (size, Set(others.map(\.bsdName)).count)
     }
 
-    /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools).
-    func run(_ c: Command, unbounded: Bool = false) async -> Result<CommandResult, HelperError> {
+    /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools). With `progress`, the
+    /// tool's output is read as it runs and turned into `.progress` events.
+    func run(
+        _ c: Command, unbounded: Bool = false, progress report: ProgressReport? = nil
+    ) async -> Result<CommandResult, HelperError> {
+        let runner = unbounded ? unboundedRunner : runner
         do {
-            return .success(try await (unbounded ? unboundedRunner : runner).run(c))
+            guard let report else { return .success(try await runner.run(c)) }
+            return .success(try await runner.run(c, onOutputLine: Self.reporter(report, to: progress)))
         } catch CommandRunnerError.toolMissing(let path) {
             return .failure(.toolMissing(path))
         } catch {
             return .failure(.commandFailed(String(describing: error)))
+        }
+    }
+
+    /// Which drive and operation a tool's progress is about, and how to read it from the tool's output.
+    struct ProgressReport {
+        var bsdName: String
+        var operation: ProgressOperation
+        var parser: any ProgressParsing
+    }
+
+    /// Turns output lines into `.progress` events for `sink`, about two a second.
+    static func reporter(
+        _ report: ProgressReport, to sink: @escaping @Sendable (VolumeEvent) -> Void
+    ) -> @Sendable (String) -> Void {
+        let state = Mutex((parser: report.parser, throttle: ProgressThrottle()))
+        let (bsdName, operation) = (report.bsdName, report.operation)
+        return { line in
+            let fraction = state.withLock { s -> Double? in
+                guard let f = s.parser.fraction(after: line), s.throttle.admit(f) else { return nil }
+                return f
+            }
+            if let fraction { sink(.progress(bsdName: bsdName, operation: operation, fraction: fraction)) }
         }
     }
 
