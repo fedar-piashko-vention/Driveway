@@ -2,28 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleIdentifier</key>
-	<string>app.driveway.Driveway</string>
-	<key>CFBundleName</key>
-	<string>Driveway</string>
 	<key>CFBundleDisplayName</key>
 	<string>Driveway</string>
 	<key>CFBundleExecutable</key>
 	<string>Driveway</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>Driveway</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.driveway.Driveway</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Driveway</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.0.0-dev</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>15.4</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Driveway opens a Terminal window to install macFUSE with Homebrew.</string>
-	<key>NSHighResolutionCapable</key>
-	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -35,5 +29,13 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.4</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Driveway opens a Terminal window to install macFUSE with Homebrew.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>

@@ -54,6 +54,11 @@ done
 plutil -replace CFBundleExecutable -string Driveway "${APP}/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string DrivewayAgent "${AGENT_APP}/Contents/Info.plist"
 
+# The icon: Dock, Finder and About for the app; notifications for the agent (it posts them).
+mkdir -p "${AGENT_APP}/Contents/Resources"
+cp Packaging/Driveway.icns "${APP}/Contents/Resources/Driveway.icns"
+cp Packaging/Driveway.icns "${AGENT_APP}/Contents/Resources/Driveway.icns"
+
 cp Packaging/app.driveway.helper.plist Packaging/app.driveway.agent.plist \
     Packaging/install-helper.sh Packaging/uninstall-helper.sh "${APP}/Contents/Resources/"
 chmod 755 "${APP}/Contents/Resources/install-helper.sh" "${APP}/Contents/Resources/uninstall-helper.sh"

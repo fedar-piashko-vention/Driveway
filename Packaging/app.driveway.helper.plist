@@ -2,18 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>app.driveway.Driveway</string>
+	</array>
+	<key>KeepAlive</key>
+	<true/>
 	<key>Label</key>
 	<string>app.driveway.helper</string>
-	<key>Program</key>
-	<string>/Library/PrivilegedHelperTools/app.driveway.helper</string>
 	<key>MachServices</key>
 	<dict>
 		<key>app.driveway.helper</key>
 		<true/>
 	</dict>
+	<key>Program</key>
+	<string>/Library/PrivilegedHelperTools/app.driveway.helper</string>
 	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
 	<true/>
 	<key>StandardErrorPath</key>
 	<string>/Library/Logs/Driveway/helper.log</string>
