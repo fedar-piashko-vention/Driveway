@@ -243,6 +243,9 @@ public actor HelperService {
                 volumes.append(v)
             } else if let fs = await filesystem(of: d) {
                 volumes.append(describe(d, fs))
+            } else if notes[d.bsdName]?.lastError != nil {
+                // A drive the helper couldn't read (no Full Disk Access): listed, so its Info tab says why.
+                volumes.append(describe(d, .other))
             }
         }
         return volumes
@@ -261,22 +264,37 @@ public actor HelperService {
 
     /// The caller holds the disk's queue.
     /// A disk Driveway won't take over is always left to macOS, so a mount the approval callback refused earlier
-    /// is released and asked for again.
+    /// is released and asked for again. Every such decision is logged with its reason.
     private func appeared(_ disk: DiskDescription) async -> VolumeEvent? {
-        guard let ctx = await context() else { return await leaveToMacOS(disk, nil) }
+        guard let ctx = await context() else {
+            return await leave(disk, nil, because: "protected (the boot disk is unknown, so every disk counts as protected)")
+        }
         // Gone already: its disappearance overtook this event.
         guard let d = ctx.disks.first(where: { $0.bsdName == disk.bsdName }) else { return nil }
-        guard !Self.isEFI(d), !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return await leaveToMacOS(d, nil) }
+        if Self.isEFI(d) { return await leave(d, nil, because: "protected (EFI system partition)") }
+        if ctx.policy.isProtected(d, allDisks: ctx.disks) { return await leave(d, nil, because: "protected") }
         if let existing = mounts[d.bsdName] { return .mounted(existing) }
 
-        guard let fs = await filesystem(of: d) else { return await leaveToMacOS(d, nil) }
+        let detection = await detect(d)
+        if detection.needsFullDiskAccess, Self.mayBeDrivewaysDrive(d, detection.kind) {
+            // Driveway would mount it if it could open it: say why it can't instead of leaving it silently.
+            for candidate in detection.kind.map({ [$0] }) ?? [.ntfs, .ext4] {
+                if case .takeOver = await plan(d, candidate, ctx.settings, explicit: false) {
+                    return await leaveForFullDiskAccess(d, detection.kind)
+                }
+            }
+        }
+        guard let fs = detection.kind else {
+            return await leave(d, nil, because: "unknown filesystem (\(detection.headerSummary))")
+        }
         switch await plan(d, fs, ctx.settings, explicit: false) {
         case .backOff(let driver):
+            log("Leaving \(d.bsdName) to \(driver), which mounted it.")
             let event = VolumeEvent.backedOff(describe(d, fs), driver: driver)
             _ = await leaveToMacOS(d, fs)
             return event
-        case .leave:
-            return await leaveToMacOS(d, fs)
+        case .leave(let reason):
+            return await leave(d, fs, because: reason)
         case .takeOver(let backend, let user):
             switch await takeOver(d, fs, backend: backend, user: user, ctx: ctx) {
             case .mounted(let v): return .mounted(v)
@@ -284,6 +302,34 @@ public actor HelperService {
             case .failed(let v, let message, _, _): return .mountFailed(v, message: message)
             }
         }
+    }
+
+    /// Logs why `d` is left to macOS, then leaves it.
+    func leave(_ d: DiskDescription, _ fs: FilesystemKind?, because reason: String) async -> VolumeEvent? {
+        log("Leaving \(d.bsdName) to macOS: \(reason).")
+        return await leaveToMacOS(d, fs)
+    }
+
+    /// macOS refused the helper the drive's raw device. The drive is left to macOS (read-only for NTFS), and the
+    /// reason is kept in `notes`, so the notification and the Info tab both say what to do.
+    private func leaveForFullDiskAccess(_ d: DiskDescription, _ fs: FilesystemKind?) async -> VolumeEvent {
+        let message = Copy.needsFullDiskAccess(label: Self.displayLabel(d))
+        notes[d.bsdName] = (notes[d.bsdName]?.health ?? .unknown, message)
+        if case .mountFailed(_, let error)? = await leave(
+            d, fs, because: "the helper has no Full Disk Access (macOS refused to let it open /dev/r\(d.bsdName))")
+        {
+            log("macOS couldn't mount \(d.bsdName) either: \(error)")
+        }
+        return .mountFailed(describe(await refreshed(d), fs ?? .other), message: message)
+    }
+
+    /// Whether a drive the helper couldn't read may be one Driveway mounts: NTFS or ext, or with no known filesystem
+    /// a Linux partition. Other unknown partitions (Microsoft Reserved, a whole disk's partition map) are not.
+    static func mayBeDrivewaysDrive(_ d: DiskDescription, _ kind: FilesystemKind?) -> Bool {
+        if let kind { return kind.isDrivewayManaged }
+        guard !d.isWholeMedia, let content = d.contentType?.lowercased() else { return false }
+        if content.contains("swap") { return false }
+        return content.contains("linux") || content == "0fc63daf-8483-4772-8e79-3d69d8477de4"
     }
 
     /// Runs the plug-in decision again for NTFS and ext partitions that Driveway doesn't hold: drives attached at
@@ -354,13 +400,42 @@ public actor HelperService {
 
     // MARK: - Helpers
 
+    /// What reading a drive's header showed: its filesystem, and why the header couldn't be read, if it couldn't.
+    struct Detection {
+        var kind: FilesystemKind?
+        var headerError: (any Error)?
+
+        /// macOS privacy protection refused the raw device: the helper has no Full Disk Access.
+        var needsFullDiskAccess: Bool {
+            (headerError as? DADiskInventory.HeaderError)?.isPermissionDenied == true
+        }
+
+        var headerSummary: String {
+            guard let headerError else {
+                return "the header matches no filesystem Driveway knows, and macOS doesn't recognise it either"
+            }
+            let reason = (headerError as? DADiskInventory.HeaderError).map(String.init(describing:)) ?? "\(headerError)"
+            return "the header couldn't be read: \(reason)"
+        }
+    }
+
     /// The volume's header first; DiskArbitration's kind only when the header says nothing or can't be read
     /// (DiskArbitration has reported a fresh NTFS partition as exFAT).
-    func filesystem(of d: DiskDescription) async -> FilesystemKind? {
-        let fromHeader = (try? await inventory.header(of: d.bsdName)).flatMap(FilesystemProbe.detect(header:))
+    func detect(_ d: DiskDescription) async -> Detection {
+        var fromHeader: FilesystemKind?
+        var headerError: (any Error)?
+        do {
+            fromHeader = FilesystemProbe.detect(header: try await inventory.header(of: d.bsdName))
+        } catch {
+            headerError = error
+        }
         let kind = fromHeader ?? FilesystemProbe.kind(forDAVolumeKind: d.volumeKind, volumeType: d.volumeType)
         if let kind { shared.withLock { $0.detected[d.bsdName] = kind } }
-        return kind
+        return Detection(kind: kind, headerError: headerError)
+    }
+
+    func filesystem(of d: DiskDescription) async -> FilesystemKind? {
+        await detect(d).kind
     }
 
     func refreshed(_ d: DiskDescription) async -> DiskDescription {
@@ -394,15 +469,46 @@ public actor HelperService {
         return (size, Set(others.map(\.bsdName)).count)
     }
 
-    /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools).
+    /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools). A raw-device tool that
+    /// failed because macOS refused it the drive fails with the Full Disk Access message, not its own words
+    /// ("Volume is corrupt"), unless the helper is known to have Full Disk Access.
     func run(_ c: Command, unbounded: Bool = false) async -> Result<CommandResult, HelperError> {
+        let r: CommandResult
         do {
-            return .success(try await (unbounded ? unboundedRunner : runner).run(c))
+            r = try await (unbounded ? unboundedRunner : runner).run(c)
         } catch CommandRunnerError.toolMissing(let path) {
             return .failure(.toolMissing(path))
         } catch {
             return .failure(.commandFailed(String(describing: error)))
         }
+        if r.exitCode != 0, rawDeviceTools.contains(c.executable),
+           FullDiskAccess.deniedInToolOutput(r.stderr + "\n" + r.stdout), inventory.fullDiskAccess() != true
+        {
+            log("\(URL(fileURLWithPath: c.executable).lastPathComponent) was refused the drive (no Full Disk Access): \(Self.message(r, c))")
+            return .failure(.commandFailed(Copy.needsFullDiskAccess(label: driveLabel(for: c))))
+        }
+        return .success(r)
+    }
+
+    /// The tools that open a drive's raw device (or, for umount, unmount a FUSE mount from it).
+    private var rawDeviceTools: Set<String> {
+        [paths.ntfs3g, paths.ext4fuse, paths.ntfsfix, paths.ntfsclone, paths.mkntfs, paths.e2fsck, paths.mkfsExt4, paths.umount]
+    }
+
+    /// The label of the drive a command works on: its device (`/dev/disk4s1` or `/dev/rdisk4s1`) or mount point.
+    func driveLabel(for c: Command) -> String {
+        let disks = shared.withLock { $0.disks }
+        for argument in c.arguments {
+            if argument.hasPrefix("/dev/") {
+                var bsd = String(argument.dropFirst(5))
+                if bsd.hasPrefix("rdisk") { bsd.removeFirst() }
+                if let v = mounts[bsd] { return v.label }
+                if let d = disks.first(where: { $0.bsdName == bsd }) { return Self.displayLabel(d) }
+            }
+            if let v = mounts.values.first(where: { $0.mountPoint == argument }) { return v.label }
+            if let d = disks.first(where: { $0.volumePath == argument }) { return Self.displayLabel(d) }
+        }
+        return "this drive"
     }
 
     /// Like `run`, but a non-zero exit is a failure carrying the tool's message.

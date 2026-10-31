@@ -23,12 +23,26 @@ extension HelperService {
     ) async -> Result<Volume, MountFailure> {
         if let existing = mounts[d.bsdName] { return .success(existing) }
         var fs = FilesystemKind.other
-        if let knownFilesystem { fs = knownFilesystem } else if let detected = await filesystem(of: d) { fs = detected }
-        if case .takeOver(let backend, let user) = await plan(d, fs, ctx.settings, explicit: true) {
+        if let knownFilesystem {
+            fs = knownFilesystem
+        } else {
+            let detection = await detect(d)
+            if let detected = detection.kind {
+                fs = detected
+            } else if detection.needsFullDiskAccess {
+                let message = Copy.needsFullDiskAccess(label: Self.displayLabel(d))
+                log("Couldn't mount \(d.bsdName): the helper has no Full Disk Access.")
+                return .failure(MountFailure(error: .commandFailed(message), readOnlyByMacOS: false))
+            }
+        }
+        switch await plan(d, fs, ctx.settings, explicit: true) {
+        case .takeOver(let backend, let user):
             switch await takeOver(d, fs, backend: backend, user: user, ctx: ctx) {
             case .mounted(let v), .readOnly(let v, _): return .success(v)
             case .failed(_, _, let e, let readOnly): return .failure(MountFailure(error: e, readOnlyByMacOS: readOnly))
             }
+        case .leave(let reason): log("Leaving \(d.bsdName) to macOS: \(reason).")
+        case .backOff(let driver): log("Leaving \(d.bsdName) to \(driver), which mounted it.")
         }
         if d.volumePath != nil { return .success(describe(d, fs)) }
         switch await handBackToMacOS(d.bsdName) {
@@ -221,7 +235,8 @@ extension HelperService {
 
     enum Plan {
         case takeOver(MountBackend, ConsoleUser)
-        case leave
+        /// Why the drive is left to macOS, for the log.
+        case leave(String)
         case backOff(String)
     }
 
@@ -230,15 +245,31 @@ extension HelperService {
         var settings = settings
         if explicit { settings.autoMountNTFS = true }
         let user = Self.loggedIn(consoleUser())
+        let features = features()
         let action = autoMountAction(
             filesystem: fs, mountedBy: Self.owner(of: d) ?? MountOwner.none, settingsKey: d.settingsKey, settings: settings,
-            features: features(), consoleUser: user)
+            features: features, consoleUser: user)
         switch action {
         case .backOff(let driver): return .backOff(driver)
-        case .leaveToMacOS: return .leave
+        case .leaveToMacOS:
+            let reason = autoMountLeaveReason(
+                filesystem: fs, settingsKey: d.settingsKey, settings: settings, features: features, consoleUser: user)
+            return .leave(reason?.description ?? "left to macOS")
         case .mountNTFSReadWrite, .mountExtReadOnly:
-            guard let user, case .ready(let backend) = await backendAvailability() else { return .leave }
+            guard let user else { return .leave(LeaveReason.nobodyLoggedIn.description) }
+            let availability = await backendAvailability()
+            guard case .ready(let backend) = availability else {
+                return .leave("the mount backend is not ready (\(Self.describe(availability)))")
+            }
             return .takeOver(backend, user)
+        }
+    }
+
+    static func describe(_ availability: BackendAvailability) -> String {
+        switch availability {
+        case .ready(let backend): "ready(\(backend.rawValue))"
+        case .needsApproval(let backend): "needsApproval(\(backend.rawValue))"
+        case .unavailable: "unavailable"
         }
     }
 
