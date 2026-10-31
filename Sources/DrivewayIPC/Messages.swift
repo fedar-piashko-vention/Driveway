@@ -72,3 +72,24 @@ extension ReadOnlyReason {
         }
     }
 }
+
+extension VolumeEvent {
+    /// The volume list after this event: a volume carried by the event replaces the one with the same BSD name, or is
+    /// appended; `removed` drops it.
+    public func applied(to volumes: [Volume]) -> [Volume] {
+        let updated: Volume
+        switch self {
+        case .removed(let bsdName):
+            return volumes.filter { $0.bsdName != bsdName }
+        case .mounted(let v), .mountedReadOnly(let v, _), .backedOff(let v, _), .mountFailed(let v, _):
+            updated = v
+        }
+        var result = volumes
+        if let index = result.firstIndex(where: { $0.bsdName == updated.bsdName }) {
+            result[index] = updated
+        } else {
+            result.append(updated)
+        }
+        return result
+    }
+}
