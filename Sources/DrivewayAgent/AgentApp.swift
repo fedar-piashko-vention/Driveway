@@ -24,6 +24,7 @@ final class Agent {
 
     private let logger = Logger(subsystem: "app.driveway.agent", category: "agent")
     private let notifier = Notifier()
+    private var inFlight: Set<String> = []
     private lazy var link = HelperLink(logger: logger) { [weak self] event in self?.handle(event) }
 
     func start() {
@@ -35,25 +36,35 @@ final class Agent {
         switch event {
         case .mountedReadOnly(let volume, let reason):
             let (health, error) = reason.healthAndError
-            notifier.post(
-                .readOnly(label: volume.label, bsdName: volume.bsdName, health: health, error: error))
+            let content = NotificationContent.readOnly(
+                label: volume.label, bsdName: volume.bsdName, health: health, error: error)
+            Task { await notifier.post(content) }
         case .mountFailed(let volume, let message):
-            notifier.post(.mountFailed(label: volume.label, message: message))
+            let content = NotificationContent.mountFailed(label: volume.label, message: message)
+            Task { await notifier.post(content) }
         case .backedOff(let volume, let driver):
-            guard markNotified(driver: driver) else { return }
-            notifier.post(.backedOff(label: volume.label, driver: driver))
+            announceOnce(driver: driver, content: .backedOff(label: volume.label, driver: driver))
         case .mounted, .removed:
             break
         }
     }
 
-    /// True the first time a driver is seen. The set persists, so each driver is announced once per user.
-    private func markNotified(driver: String) -> Bool {
-        let defaults = UserDefaults.standard
-        var seen = Set(defaults.stringArray(forKey: Self.notifiedDriversKey) ?? [])
-        guard seen.insert(driver).inserted else { return false }
-        defaults.set(seen.sorted(), forKey: Self.notifiedDriversKey)
-        return true
+    /// Announces a driver once per user. The driver is recorded only after the notification was delivered, so a denied
+    /// or failed post doesn't use up the notice. `inFlight` stops two events for one driver racing to post twice.
+    private func announceOnce(driver: String, content: NotificationContent) {
+        guard !notifiedDrivers.contains(driver), inFlight.insert(driver).inserted else { return }
+        Task {
+            if await notifier.post(content) { markNotified(driver: driver) }
+            inFlight.remove(driver)
+        }
+    }
+
+    private var notifiedDrivers: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.notifiedDriversKey) ?? [])
+    }
+
+    private func markNotified(driver: String) {
+        UserDefaults.standard.set((notifiedDrivers.union([driver])).sorted(), forKey: Self.notifiedDriversKey)
     }
 }
 
@@ -75,28 +86,31 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         center.delegate = self
-        let logger = logger
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error {
+        Task {
+            do {
+                if try await center.requestAuthorization(options: [.alert, .sound]) == false {
+                    logger.notice("The user has not allowed notifications.")
+                }
+            } catch {
                 logger.error("Notification authorization failed: \(error.localizedDescription, privacy: .public)")
-            } else if !granted {
-                logger.notice("The user has not allowed notifications.")
             }
         }
     }
 
-    func post(_ content: NotificationContent) {
-        guard let center else { return }
+    /// Returns true once the system accepted the notification.
+    func post(_ content: NotificationContent) async -> Bool {
+        guard let center else { return false }
         let note = UNMutableNotificationContent()
         note.title = content.title
         note.body = content.body
         note.sound = .default
         if let url = content.openURL { note.userInfo = [Self.urlKey: url.absoluteString] }
-        let logger = logger
-        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: note, trigger: nil)) { error in
-            if let error {
-                logger.error("Couldn't post a notification: \(error.localizedDescription, privacy: .public)")
-            }
+        do {
+            try await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: note, trigger: nil))
+            return true
+        } catch {
+            logger.error("Couldn't post a notification: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -167,6 +181,7 @@ final class HelperLink {
 
 /// Exported to the helper. XPC calls arrive on an arbitrary queue, so events hop to the main actor.
 final class EventReceiver: NSObject, DrivewayEventsXPC, Sendable {
+    private let logger = Logger(subsystem: "app.driveway.agent", category: "events")
     private let onEvent: @MainActor (VolumeEvent) -> Void
 
     init(onEvent: @escaping @MainActor (VolumeEvent) -> Void) {
@@ -174,8 +189,12 @@ final class EventReceiver: NSObject, DrivewayEventsXPC, Sendable {
     }
 
     func volumeEvent(_ event: Data) {
-        guard let decoded = try? JSONDecoder().decode(VolumeEvent.self, from: event) else { return }
-        let onEvent = onEvent
-        Task { @MainActor in onEvent(decoded) }
+        do {
+            let decoded = try JSONDecoder().decode(VolumeEvent.self, from: event)
+            let onEvent = onEvent
+            Task { @MainActor in onEvent(decoded) }
+        } catch {
+            logger.error("Couldn't decode a volume event: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
