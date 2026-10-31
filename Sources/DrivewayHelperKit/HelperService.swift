@@ -463,6 +463,13 @@ public actor HelperService {
         return !path.split(separator: "/").contains("..")
     }
 
+    /// Nothing at `path` yet, or a regular file to replace; never a symlink, directory or device.
+    static func isReplaceableImagePath(_ path: String) -> Bool {
+        var st = stat()
+        guard lstat(path, &st) == 0 else { return errno == ENOENT }
+        return st.st_mode & S_IFMT == S_IFREG
+    }
+
     static func message(_ r: CommandResult, _ c: Command) -> String {
         for text in [r.stderr, r.stdout] {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -405,7 +405,10 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: "/dev/disk2"), authorization: auth) == .error(.commandFailed("Choose a file location for the backup image.")))
     #expect(h.runner.commands.isEmpty)
     #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/x/b.img"), authorization: auth) == .ok)
-    #expect(h.runner.commands == [cmd(tools.ntfsclone, "--save-image", "--force", "--output", "/Users/x/b.img", "/dev/disk4s1")])
+    #expect(h.runner.commands == [
+        cmd(tools.ntfsclone, "--save-image", "--force", "--overwrite", "/Users/x/b.img", "/dev/disk4s1"),
+        cmd(tools.chown, "-h", "501:20", "/Users/x/b.img"),
+    ])
 }
 
 // MARK: - Format
@@ -1158,7 +1161,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
         h.runner.script(tools.ntfsfix, "-d", exit: 0, stdout: ntfsfixOK)
         _ = await h.service.handle(request, authorization: auth)
-        #expect(h.runner.commands.last == cmd(diskutil, "mount", "/dev/disk4s1"), "\(request)")
+        #expect(h.runner.commands.contains(cmd(diskutil, "mount", "/dev/disk4s1")), "\(request)")
         #expect(!h.runner.commands.contains { $0.executable == ntfs3g }, "\(request)")
     }
 
@@ -1175,4 +1178,43 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
     _ = await h.service.handle(.check(ref("disk4s1")), authorization: nil)
     #expect(h.runner.commands == [cmd(tools.ntfsfix, "-n", "/dev/disk4s1")])
+}
+
+// MARK: - Final review: backups replace a file and belong to the user (M3)
+
+@Test func backupIsGivenToTheConsoleUser() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader], console: ConsoleUser(uid: 502, gid: 20))
+    #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/y/b.img"), authorization: auth) == .ok)
+    #expect(h.runner.commands.last == cmd(tools.chown, "-h", "502:20", "/Users/y/b.img"))
+
+    // A failed backup isn't handed over.
+    let failed = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    failed.runner.script(tools.ntfsclone, "--save-image", exit: 1, stderr: "disk full")
+    #expect(await failed.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/y/b.img"), authorization: auth) == .error(.commandFailed("disk full")))
+    #expect(!failed.runner.commands.contains { $0.executable == tools.chown })
+
+    // The image was saved but stays root's: said, not hidden.
+    let stuck = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    stuck.runner.script(tools.chown, "-h", exit: 1, stderr: "chown: Operation not permitted")
+    #expect(await stuck.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/y/b.img"), authorization: auth)
+        == .error(.commandFailed("The backup was saved, but it couldn't be made yours: chown: Operation not permitted")))
+}
+
+@Test func backupRefusesToOverwriteAnythingButAFile() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("driveway-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let link = dir.appendingPathComponent("link.img").path
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/etc/hosts")
+    let existing = dir.appendingPathComponent("old.img").path
+    FileManager.default.createFile(atPath: existing, contents: Data([1]))
+
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    for path in [link, dir.path] {
+        #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: path), authorization: auth)
+            == .error(.commandFailed("Choose a file location for the backup image.")), "\(path)")
+    }
+    #expect(h.runner.commands.isEmpty)
+    // An existing file is replaced: the save panel already asked.
+    #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: existing), authorization: auth) == .ok)
 }

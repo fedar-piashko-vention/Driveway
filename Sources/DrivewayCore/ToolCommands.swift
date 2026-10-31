@@ -44,8 +44,14 @@ public enum ToolCommands {
     /// Saves an image of an NTFS volume in ntfsclone's special format: every cluster in use (all files and
     /// metadata, not only metadata), so it takes as long as copying the used data. A safety backup before a
     /// repair. `--force` because the drives that need "Back up first" are the ones with the dirty flag set.
+    /// `--overwrite` because `--output` refuses an existing file, and the save panel has already asked to replace it.
     public static func ntfsclone(device: String, imagePath: String, paths: ToolPaths) -> Command {
-        Command(executable: paths.ntfsclone, arguments: ["--save-image", "--force", "--output", imagePath, device])
+        Command(executable: paths.ntfsclone, arguments: ["--save-image", "--force", "--overwrite", imagePath, device])
+    }
+
+    /// Gives a file the helper made to a user: `chown -h <uid>:<gid> <path>` (`-h`: a symlink itself, never its target).
+    public static func chown(path: String, uid: UInt32, gid: UInt32, paths: ToolPaths) -> Command {
+        Command(executable: paths.chown, arguments: ["-h", "\(uid):\(gid)", path])
     }
 
     /// `.check` is `-n -f`, `.repair` is `-p -f`, `.repairForce` is `-y -f`.

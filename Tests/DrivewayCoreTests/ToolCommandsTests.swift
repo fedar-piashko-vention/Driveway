@@ -16,6 +16,13 @@ private let p = ToolPaths()
     #expect(p.mkfsExt4 == "/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4")
     #expect(p.diskutil == "/usr/sbin/diskutil")
     #expect(p.umount == "/sbin/umount")
+    #expect(p.chown == "/usr/sbin/chown")
+}
+
+@Test func chownGivesAFileToAUserWithoutFollowingSymlinks() {
+    #expect(
+        ToolCommands.chown(path: "/Users/me/b.img", uid: 501, gid: 20, paths: p)
+            == Command(executable: "/usr/sbin/chown", arguments: ["-h", "501:20", "/Users/me/b.img"]))
 }
 
 @Test func ntfs3gReadWriteMountKernel() {
@@ -94,7 +101,7 @@ private let p = ToolPaths()
         ToolCommands.ntfsclone(device: "/dev/disk4s1", imagePath: "/Users/me/b.img", paths: p)
             == Command(
                 executable: "/opt/homebrew/sbin/ntfsclone",
-                arguments: ["--save-image", "--force", "--output", "/Users/me/b.img", "/dev/disk4s1"]))
+                arguments: ["--save-image", "--force", "--overwrite", "/Users/me/b.img", "/dev/disk4s1"]))
 }
 
 @Test func diskutilPassesArgsThrough() {

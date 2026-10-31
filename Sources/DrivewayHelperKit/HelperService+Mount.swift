@@ -109,7 +109,9 @@ extension HelperService {
 
     func backup(_ d: DiskDescription, _ ctx: Context, imagePath: String) async -> HelperResponse {
         guard await filesystem(of: d) == .ntfs else { return .error(.commandFailed("Back up is only for NTFS drives.")) }
-        guard Self.isSafeImagePath(imagePath) else { return .error(.commandFailed(Self.badImagePathMessage)) }
+        guard Self.isSafeImagePath(imagePath), Self.isReplaceableImagePath(imagePath) else {
+            return .error(.commandFailed(Self.badImagePathMessage))
+        }
         let command = ToolCommands.ntfsclone(device: "/dev/\(d.bsdName)", imagePath: imagePath, paths: paths)
         let (result, remountError) = await whileUnmounted(d, ctx, command)
         let failure: String?
@@ -117,9 +119,18 @@ extension HelperService {
         case .failure(let e): failure = Self.text(e)
         case .success(let r): failure = r.exitCode == 0 ? nil : Self.message(r, command)
         }
+        // ntfsclone ran as root: the image is the user's, not root's.
+        var saved = "The backup was saved."
+        var notYours = false
+        if failure == nil, let user = Self.loggedIn(consoleUser()),
+           case .failure(let e) = await runOK(ToolCommands.chown(path: imagePath, uid: user.uid, gid: user.gid, paths: paths))
+        {
+            saved = "The backup was saved, but it couldn't be made yours: \(Self.text(e))"
+            notYours = true
+        }
         switch (failure, remountError) {
-        case (nil, nil): return .ok
-        case (nil, let note?): return .error(.commandFailed("The backup was saved. \(note)"))
+        case (nil, nil): return notYours ? .error(.commandFailed(saved)) : .ok
+        case (nil, let note?): return .error(.commandFailed("\(saved) \(note)"))
         case (let message?, nil): return .error(.commandFailed(message))
         case (let message?, let note?): return .error(.commandFailed("\(message) \(note)"))
         }
