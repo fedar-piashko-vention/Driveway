@@ -11,6 +11,7 @@ Driveway is a free, open-source utility that mounts NTFS drives read/write on Ap
 
 - **NTFS writing needs a working mount backend.** Driveway uses macFUSE's kernel backend on a Mac that already allows third-party kernel extensions (for example because Tuxera or Paragon is or was installed). Otherwise it uses macFUSE's FSKit backend. FSKit is currently broken on macOS 15.7.x: mounts fail even for simple test filesystems. On such a Mac with default settings, drives cannot be written yet, and Setup says "Not available on this Mac yet". Drives stay readable through macOS's own read-only NTFS support.
 - **Driveway never asks you to lower your Mac's security.** It does not guide you through Recovery or kernel-extension settings, and it never changes them itself. Where the kernel backend is available, that is because your Mac already allows it.
+- **Hibernated and Fast Startup drives mount read-only, with no one-click fix.** Forcing such a drive read/write would destroy the unsaved Windows session. Shut Windows down fully, or turn off Fast Startup with `powercfg /hibernate off` in Windows.
 - **ext drives are read-only in v1.** The Homebrew tap Driveway uses has no read/write ext driver. ext volumes mount read-only through `ext4fuse`. Check & Repair and Format for ext work through e2fsprogs.
 - **`ntfsfix` is not `chkdsk`.** Check & Repair fixes common problems, such as a drive that was unplugged without ejecting. It does not repair deeper damage. For that, connect the drive to a Windows PC and run `chkdsk /f`. Back up first. Driveway offers to image the drive before a repair.
 - **Speed was measured only on a disk image.** With the kernel backend, ntfs-3g wrote 1 GB to a 2 GB disk image on the internal SSD at about 206 MB/s. That is not representative of a USB drive, and no real-drive or FSKit number exists yet. FSKit is documented by macFUSE as slower than the kernel backend, and ntfs-3g is likely to be slower than Tuxera. That trade-off is accepted.
@@ -22,7 +23,7 @@ Driveway is a free, open-source utility that mounts NTFS drives read/write on Ap
 - macOS 15.4 or later
 - Apple Silicon
 - [Homebrew](https://brew.sh), at `/opt/homebrew`
-- macFUSE 5.4.0 or later. Earlier 5.x versions can write zero-filled data for small writes on FSKit, so Driveway refuses to mount with them. Setup installs macFUSE for you, and macFUSE's licence does not allow bundling it.
+- macFUSE 5.4.0 or later. Earlier 5.x versions can write zero-filled data for small writes on FSKit, so Driveway does not use them for writing. With an older macFUSE, Setup shows macFUSE as needing an update, and Driveway does not mount NTFS drives read/write. They stay read-only, as macOS mounts them. Setup installs macFUSE for you, and macFUSE's licence does not allow bundling it.
 
 ## Uninstall Tuxera and Paragon first
 
@@ -34,8 +35,8 @@ Tuxera NTFS for Mac and Paragon NTFS install their own filesystem drivers, which
 2. Open Driveway from Applications. macOS says it cannot verify the app and blocks it. Click **Done** (or **OK**).
 3. Open **System Settings > Privacy & Security** and scroll down to the Security section. You will see a message that "Driveway" was blocked. Click **Open Anyway**, then confirm with your password or Touch ID, and click **Open Anyway** once more in the dialog that follows.
 4. The Setup screen opens. Click **Unlock everything**, or unlock one feature at a time:
-   - Setup runs `brew install` for the tools, with live output. It installs the `gromgit/fuse` tap formulas `ntfs-3g-mac` and `ext4fuse-mac`, `e2fsprogs`, and the `macfuse` cask. The tap prints "not trusted" warnings and asks for confirmation. Setup shows the question, and nothing proceeds until you click **Continue**.
-   - macFUSE asks for your password, then needs a one-time approval in System Settings. Setup shows **Needs approval** with an **Open Settings** button and re-checks when you come back. A restart may follow.
+   - The Homebrew tools install inside Setup, with live output: the `gromgit/fuse` tap formulas `ntfs-3g-mac` and `ext4fuse-mac`, and `e2fsprogs`. The tap prints "not trusted" warnings and asks for confirmation. Setup shows the question, and nothing proceeds until you click **Continue**.
+   - macFUSE is different. Setup opens a Terminal window that runs `brew install --cask macfuse`, and you type your password there. Afterwards Setup may show macFUSE as **Needs approval**, with an **Open Settings** button. This is macFUSE's own approval in the normal System Settings pane (Privacy & Security, or General > Login Items & Extensions), and Setup re-checks when you come back. A restart may follow. Driveway never asks you to change Recovery or any other security setting.
    - The Driveway helper installs with one administrator password prompt.
 5. Plug in an NTFS drive. It should mount read/write within a few seconds.
 
