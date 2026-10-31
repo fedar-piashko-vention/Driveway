@@ -24,8 +24,6 @@ let backendProbe = BackendProbe(runner: ProcessCommandRunner(timeout: .seconds(3
 let features = Mutex<[Feature: FeatureState]>(
     featureStates(HelperEnvironment.currentToolInventory(paths: paths, backend: .unavailable)))
 
-// Mounts keep the default time limit. Check, repair, backup and format run for as long as they take: stopping
-// ntfsclone, e2fsck or ntfsfix half-way through a large drive would do more harm than waiting.
 /// Armed once the helper has adopted its old mounts and the disk watcher runs; until then nothing is evaluated
 /// again (a drive still mounted from before a restart must be adopted, not taken over).
 let trigger = Mutex<ReevaluationTrigger?>(nil)
@@ -48,6 +46,8 @@ let trigger = Mutex<ReevaluationTrigger?>(nil)
     }
 }
 
+// Mounts keep the default time limit. Check, repair, backup and format run for as long as they take: stopping
+// ntfsclone, e2fsck or ntfsfix half-way through a large drive would do more harm than waiting.
 let service = HelperService(
     runner: ProcessCommandRunner(), unboundedRunner: ProcessCommandRunner(timeout: nil), auth: SystemAuthorizationVerifier(), inventory: inventory,
     settings: SettingsStore(), paths: paths, backendProbe: backendProbe, osBuild: HelperEnvironment.osBuild(),
