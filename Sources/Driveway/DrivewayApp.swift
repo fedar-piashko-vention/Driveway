@@ -65,7 +65,8 @@ struct DiskManagerView: View {
                     .tabItem { Text("Info") }
                 CheckRepairTab(model: model, volume: volume)
                     .tabItem { Text("Check & Repair") }
-                Text("Format arrives in a later build.")
+                FormatTab(model: model, volume: volume)
+                    .id(volume.bsdName)
                     .tabItem { Text("Format") }
             }
             .padding()

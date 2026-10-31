@@ -23,6 +23,9 @@ final class DiskManagerModel {
     private(set) var reports: [String: CheckReport] = [:]
     /// Where the latest backup of each drive was saved, by BSD name.
     private(set) var backups: [String: String] = [:]
+    /// The features the Setup scan found ready. The Format tab only offers the filesystems these make usable.
+    /// Everything counts as ready until the scanner (which fills this in) exists.
+    var readyFeatures: Set<Feature> = Set(Feature.allCases)
 
     @ObservationIgnored private let client: HelperClient
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
@@ -120,6 +123,24 @@ final class DiskManagerModel {
             backups[volume.bsdName] = path
         } else {
             unexpected(response, for: request)
+        }
+    }
+
+    /// Erases and formats the drive (or its whole disk). Afterwards the drive's BSD name may have changed, or the
+    /// volume may have gone: the list is reloaded, and a selection that no longer exists moves to the new volume on
+    /// the same disk. The caller closes its confirmation sheet when this returns, however it ended.
+    func format(_ request: FormatRequest, volume: Volume) async {
+        let result = await operate(on: volume, .format(request), authorized: true)
+        if case .reply(let response) = result {
+            switch response {
+            case .ok, .volume(nil): break
+            case .volume(let formatted?):
+                if volumes.contains(where: { $0.bsdName == formatted.bsdName }) { selection = formatted.bsdName }
+            default: unexpected(response, for: .format(request))
+            }
+        }
+        if selectedVolume == nil, selection == volume.bsdName {
+            selection = volumes.first { $0.wholeDisk == volume.wholeDisk }?.bsdName
         }
     }
 
@@ -273,7 +294,7 @@ extension HelperError {
         case .unknownVolume: "That drive is no longer connected."
         case .toolMissing(let path): "A tool Driveway needs is missing: \(path). Open Setup to install it."
         case .commandFailed(let message): message
-        case .validation(let error): "The format settings aren't valid (\(error))."
+        case .validation(let error): FormatMessages.text(for: error) ?? "The format settings aren't valid."
         }
     }
 }
