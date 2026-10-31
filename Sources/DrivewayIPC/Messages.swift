@@ -1,15 +1,32 @@
 import DrivewayCore
 
+/// The drive a request is about: its BSD name, and the identity the app showed for it. BSD names are reused by
+/// the next drive plugged in, so the helper refuses a request whose drive is no longer the one the user saw.
+public struct DiskRef: Codable, Equatable, Sendable {
+    public var bsdName: String
+    /// The volume's `settingsKey` as the app showed it.
+    public var key: String
+
+    public init(bsdName: String, key: String) {
+        self.bsdName = bsdName
+        self.key = key
+    }
+
+    public init(_ volume: Volume) {
+        self.init(bsdName: volume.bsdName, key: volume.settingsKey)
+    }
+}
+
 /// A request from the app (or agent) to the root helper. Sent as JSON over XPC.
 public enum HelperRequest: Codable, Equatable, Sendable {
     case listVolumes
-    case mount(String)
-    case unmount(String)
-    case eject(String)
-    case fixAndMount(String)
-    case check(String)
-    case repair(String, force: Bool)
-    case backup(String, imagePath: String)
+    case mount(DiskRef)
+    case unmount(DiskRef)
+    case eject(DiskRef)
+    case fixAndMount(DiskRef)
+    case check(DiskRef)
+    case repair(DiskRef, force: Bool)
+    case backup(DiskRef, imagePath: String)
     case format(FormatRequest)
     case getSettings
     case setSettings(DrivewaySettings)
@@ -74,6 +91,13 @@ extension ReadOnlyReason {
 }
 
 extension VolumeEvent {
+    /// The selected BSD name after this event: a drive that was removed is no longer selected, so a later drive
+    /// that gets the same BSD name isn't shown, or acted on, in its place.
+    public func selection(after current: String?) -> String? {
+        if case .removed(let bsdName) = self, bsdName == current { return nil }
+        return current
+    }
+
     /// The volume list after this event: a volume carried by the event replaces the one with the same BSD name, or is
     /// appended; `removed` drops it.
     public func applied(to volumes: [Volume]) -> [Volume] {

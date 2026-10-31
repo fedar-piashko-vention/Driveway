@@ -3,7 +3,7 @@ import DrivewayIPC
 import Foundation
 
 extension HelperService {
-    /// Name check, queue, lookup, EFI refusal, `validate`, protection, authorization, then the erase step, a fresh disk
+    /// Name check, queue, lookup, EFI refusal, identity, `validate`, protection, authorization, then the erase step, a fresh disk
     /// list, the data partition (refused if missing or EFI), the finish step, and a mount of NTFS or ext.
     func format(_ r: FormatRequest, authorization: Data?) async -> HelperResponse {
         let target: String
@@ -29,6 +29,14 @@ extension HelperService {
         guard let d = ctx.disks.first(where: { $0.bsdName == target }) else { return .error(.unknownVolume) }
         // The EFI system partition is never a target, whatever else the request says.
         if Self.isEFI(d) { return .error(.protectedDisk) }
+        // The drive must still be the one the user chose: for a whole disk, a volume on it (or the disk) has the key.
+        let identified: Bool
+        switch r.target {
+        case .partition: identified = identityMatches(d, key: r.expectedKey)
+        case .wholeDisk:
+            identified = ctx.disks.contains { $0.wholeDisk == d.wholeDisk && identityMatches($0, key: r.expectedKey) }
+        }
+        guard identified else { return .error(.unknownVolume) }
         do throws(FormatValidationError) {
             try validate(r, currentDriveName: Self.confirmationName(for: r, target: d, in: ctx.disks))
         } catch {

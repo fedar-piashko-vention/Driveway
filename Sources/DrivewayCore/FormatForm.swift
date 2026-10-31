@@ -28,7 +28,8 @@ public enum FormatMessages {
         filesystem: FilesystemKind, label: String, scheme: PartitionScheme, target: FormatTarget, driveName: String
     ) -> String? {
         let request = FormatRequest(
-            filesystem: filesystem, label: label, scheme: scheme, target: target, confirmation: driveName)
+            filesystem: filesystem, label: label, scheme: scheme, target: target, confirmation: driveName,
+            expectedKey: "")
         do throws(FormatValidationError) {
             try validate(request, currentDriveName: driveName)
             return nil

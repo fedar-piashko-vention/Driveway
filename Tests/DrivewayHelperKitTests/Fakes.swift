@@ -276,3 +276,6 @@ final class ConsoleBox: Sendable {
         set { state.withLock { $0 = newValue } }
     }
 }
+
+/// A request's drive reference with the key `disk(_:)` gives the volume.
+func ref(_ bsd: String) -> DiskRef { DiskRef(bsdName: bsd, key: "UUID-\(bsd)") }

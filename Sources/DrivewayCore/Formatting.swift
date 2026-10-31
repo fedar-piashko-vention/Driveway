@@ -19,16 +19,20 @@ public struct FormatRequest: Codable, Equatable, Sendable {
     public var target: FormatTarget
     /// What the user typed to confirm; must equal the current drive name.
     public var confirmation: String
+    /// The `settingsKey` of the volume the user chose to format. The helper refuses the request unless the
+    /// target (or, for a whole disk, a volume on it) still has this key: a BSD name can pass to another drive.
+    public var expectedKey: String
 
     public init(
         filesystem: FilesystemKind, label: String, scheme: PartitionScheme, target: FormatTarget,
-        confirmation: String
+        confirmation: String, expectedKey: String
     ) {
         self.filesystem = filesystem
         self.label = label
         self.scheme = scheme
         self.target = target
         self.confirmation = confirmation
+        self.expectedKey = expectedKey
     }
 }
 

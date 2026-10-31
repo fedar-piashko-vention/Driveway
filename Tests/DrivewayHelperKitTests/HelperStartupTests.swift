@@ -29,7 +29,7 @@ import Testing
 
     // Claimed: macOS may not mount it, and a Mount request doesn't mount it twice.
     #expect(!h.service.shouldApproveMacOSMount(ntfs))
-    #expect(await h.service.handle(.mount("disk4s1"), authorization: nil) == .volume(adopted))
+    #expect(await h.service.handle(.mount(ref("disk4s1")), authorization: nil) == .volume(adopted))
     #expect(h.runner.commands.isEmpty)
 }
 

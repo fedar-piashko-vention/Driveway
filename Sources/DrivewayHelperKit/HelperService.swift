@@ -95,22 +95,22 @@ public actor HelperService {
         case .helperVersion: return .version(helperProtocolVersion)
         case .backendStatus: return .backend(await backendAvailability())
         case .format(let r): return await format(r, authorization: authorization)
-        case .mount(let bsd), .unmount(let bsd), .eject(let bsd), .fixAndMount(let bsd), .check(let bsd),
-            .repair(let bsd, _), .backup(let bsd, _):
-            guard Self.isValidBSDName(bsd) else { return .error(.unknownVolume) }
-            let key = Self.lockKey(bsd)
+        case .mount(let ref), .unmount(let ref), .eject(let ref), .fixAndMount(let ref), .check(let ref),
+            .repair(let ref, _), .backup(let ref, _):
+            guard Self.isValidBSDName(ref.bsdName) else { return .error(.unknownVolume) }
+            let key = Self.lockKey(ref.bsdName)
             await lockDisk(key)
-            let response = await diskRequest(request, bsd, authorization: authorization)
+            let response = await diskRequest(request, ref, authorization: authorization)
             await releaseDisk(key)
             return response
         }
     }
 
     /// A request for one disk. The caller holds the disk's queue.
-    private func diskRequest(_ request: HelperRequest, _ bsd: String, authorization: Data?) async -> HelperResponse {
+    private func diskRequest(_ request: HelperRequest, _ ref: DiskRef, authorization: Data?) async -> HelperResponse {
         let d: DiskDescription
         let ctx: Context
-        switch await resolve(bsd, request: request, authorization: authorization) {
+        switch await resolve(ref, request: request, authorization: authorization) {
         case .failure(let e): return .error(e)
         case .success(let resolved): (d, ctx) = resolved
         }
@@ -146,19 +146,27 @@ public actor HelperService {
         return Context(disks: disks, policy: policy, settings: settings)
     }
 
-    /// Name check, then lookup, then protection (the EFI system partition included), then authorization.
-    /// The caller holds the disk's queue.
+    /// Name check, then lookup, then identity (the drive must still be the one the app showed), then
+    /// protection (the EFI system partition included), then authorization. The caller holds the disk's queue.
     private func resolve(
-        _ bsd: String, request: HelperRequest, authorization: Data?
+        _ ref: DiskRef, request: HelperRequest, authorization: Data?
     ) async -> Result<(DiskDescription, Context), HelperError> {
+        let bsd = ref.bsdName
         guard Self.isValidBSDName(bsd) else { return .failure(.unknownVolume) }
         guard let ctx = await context() else { return .failure(.protectedDisk) }
         guard let d = ctx.disks.first(where: { $0.bsdName == bsd }) else { return .failure(.unknownVolume) }
+        guard identityMatches(d, key: ref.key) else { return .failure(.unknownVolume) }
         if Self.isEFI(d) || ctx.policy.isProtected(d, allDisks: ctx.disks) { return .failure(.protectedDisk) }
         if request.requiresAuthorization, !auth.verify(authorization, right: AuthorizationRights.modifyDisk) {
             return .failure(.notAuthorized)
         }
         return .success((d, ctx))
+    }
+
+    /// True when `key` is the `settingsKey` Driveway shows for `d`: the one recorded when Driveway mounted it,
+    /// or the one its description gives now.
+    func identityMatches(_ d: DiskDescription, key: String) -> Bool {
+        key == d.settingsKey || key == mounts[d.bsdName]?.settingsKey
     }
 
     /// Waits until no other operation holds `key`, first come first served, then holds it.
