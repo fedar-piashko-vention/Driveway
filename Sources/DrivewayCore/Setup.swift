@@ -77,7 +77,8 @@ public enum SetupScreen {
     }
 
     /// The missing requirements of the given features, in each feature's requirement order and then feature order,
-    /// each once. The helper comes last, so it starts with the tools already in place.
+    /// each once. The helper comes last, so it starts with the tools already in place, and Full Disk Access after
+    /// it: it is granted to the installed helper.
     public static func unlockOrder(for features: [Feature], in states: [Feature: FeatureState]) -> [Requirement] {
         var order: [Requirement] = []
         for feature in Feature.allCases where features.contains(feature) {
@@ -85,7 +86,8 @@ public enum SetupScreen {
             for requirement in missing where !order.contains(requirement) { order.append(requirement) }
         }
         let isHelper: (Requirement) -> Bool = { $0 == .helper || $0 == .helperUpdate }
-        return order.filter { !isHelper($0) } + order.filter(isHelper)
+        let isAccess: (Requirement) -> Bool = { $0 == .fullDiskAccess }
+        return order.filter { !isHelper($0) && !isAccess($0) } + order.filter(isHelper) + order.filter(isAccess)
     }
 
     /// The requirements to act on now: up to and including the first one that continues outside Driveway.
@@ -96,8 +98,10 @@ public enum SetupScreen {
 
     /// "Open Settings" when the next thing to do is an approval in System Settings, otherwise "Unlock".
     public static func buttonTitle(for order: [Requirement]) -> String {
-        if case .macFUSEApproval? = order.first { return Copy.openSettings }
-        return Copy.unlock
+        switch order.first {
+        case .macFUSEApproval?, .fullDiskAccess?: return Copy.openSettings
+        default: return Copy.unlock
+        }
     }
 
     private static func title(_ feature: Feature) -> String {
@@ -111,7 +115,7 @@ public enum SetupScreen {
 
     private static func isWarning(_ r: Requirement) -> Bool {
         switch r {
-        case .macFUSEUpdate, .macFUSEApproval, .helperUpdate: true
+        case .macFUSEUpdate, .macFUSEApproval, .helperUpdate, .fullDiskAccess: true
         case .homebrew, .macFUSE, .ntfs3g, .ext4fuse, .e2fsprogs, .helper: false
         }
     }
@@ -134,6 +138,7 @@ extension Copy {
         case .e2fsprogs: "e2fsprogs"
         case .helper: "Driveway helper"
         case .helperUpdate: "Driveway helper — needs update"
+        case .fullDiskAccess: "Driveway helper — needs Full Disk Access in System Settings → Privacy & Security"
         }
     }
 
@@ -148,6 +153,8 @@ extension Copy {
             "Allow macFUSE in System Settings → Privacy & Security. macOS may ask you to restart. Driveway checks again when you come back."
         case .macFUSEApproval(.fskit):
             "Turn on macFUSE in System Settings → General → Login Items & Extensions → File System Extensions. Driveway checks again when you come back."
+        case .fullDiskAccess:
+            fullDiskAccessSteps
         case .ntfs3g, .ext4fuse, .e2fsprogs, .helper, .helperUpdate:
             nil
         }

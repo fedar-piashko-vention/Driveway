@@ -103,6 +103,9 @@ final class FakeInventory: DiskInventoryProviding {
         var stuck: Set<String> = []
         /// Mount table entries by device ("/dev/disk4s1").
         var entries: [String: MountEntry] = [:]
+        /// What reading a header throws, by BSD name (instead of the header).
+        var headerErrors: [String: any Error & Sendable] = [:]
+        var fullDiskAccess: Bool?
     }
     private let state: Mutex<State>
 
@@ -117,6 +120,10 @@ final class FakeInventory: DiskInventoryProviding {
     func setStuck(_ entries: Set<String>) { state.withLock { $0.stuck = entries } }
     func setMountEntry(_ entry: MountEntry?, device: String) { state.withLock { $0.entries[device] = entry } }
     func mountEntry(fromDevice device: String) -> MountEntry? { state.withLock { $0.entries[device] } }
+    func setHeaderError(_ error: (any Error & Sendable)?, for bsd: String) { state.withLock { $0.headerErrors[bsd] = error } }
+    func setHeader(_ header: Data, for bsd: String) { state.withLock { $0.headers[bsd] = header } }
+    func setFullDiskAccess(_ granted: Bool?) { state.withLock { $0.fullDiskAccess = granted } }
+    func fullDiskAccess() -> Bool? { state.withLock { $0.fullDiskAccess } }
     var headerReads: [String] { state.withLock { $0.headerReads } }
     var mountChecks: [String] { state.withLock { $0.mountChecks } }
 
@@ -125,6 +132,7 @@ final class FakeInventory: DiskInventoryProviding {
     func header(of bsdName: String) async throws -> Data {
         try state.withLock { s in
             s.headerReads.append(bsdName)
+            if let error = s.headerErrors[bsdName] { throw error }
             guard let h = s.headers[bsdName] else { throw CocoaError(.fileReadNoSuchFile) }
             return h
         }

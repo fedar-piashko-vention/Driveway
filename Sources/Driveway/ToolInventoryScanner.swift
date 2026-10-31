@@ -18,6 +18,7 @@ struct ToolInventoryScanner: Sendable {
     func scan() async -> ToolInventory {
         let helperVersion = await helperVersion()
         let backend = await backend(helperReachable: helperVersion != nil)
+        let fullDiskAccess = helperVersion != nil ? await fullDiskAccess() : nil
         return ToolInventory(
             hasHomebrew: Self.isExecutable(paths.brew),
             macFUSEVersion: Self.macFUSEVersion(),
@@ -28,7 +29,17 @@ struct ToolInventoryScanner: Sendable {
             helperVersion: helperVersion,
             // The helper reports the same constant, so a mismatch means the helper is from another build.
             appVersion: helperProtocolVersion,
-            conflictingDrivers: Self.conflictingDrivers())
+            conflictingDrivers: Self.conflictingDrivers(),
+            fullDiskAccess: fullDiskAccess)
+    }
+
+    /// Whether the helper has Full Disk Access; nil when it doesn't answer (a helper from before it could tell
+    /// answers with an error), so nothing is listed until the helper says it lacks it.
+    private func fullDiskAccess() async -> Bool? {
+        let client = client
+        let reply = await withTimeout(Self.helperTimeout) { try await client.send(.helperPermissions, authorized: false) }
+        if case .permissions(let permissions)? = reply { return permissions.fullDiskAccess }
+        return nil
     }
 
     /// The helper's version, or nil when it isn't installed, isn't running or doesn't answer in time.

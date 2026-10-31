@@ -98,6 +98,7 @@ public actor HelperService {
         case .getSettings: return .settings(currentSettings)
         case .setSettings(let s): return setSettings(s, authorization: authorization)
         case .helperVersion: return .version(helperProtocolVersion)
+        case .helperPermissions: return .permissions(HelperPermissions(fullDiskAccess: inventory.fullDiskAccess()))
         case .backendStatus:
             let availability = await backendAvailability()
             backendChecked(availability)

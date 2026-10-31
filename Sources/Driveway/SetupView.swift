@@ -23,6 +23,7 @@ struct SetupView: View {
                 Label(notice, systemImage: "info.circle")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
@@ -71,6 +72,7 @@ private struct FeatureGroupRow: View {
                 }
                 ForEach(group.items, id: \.label) { item in
                     Text("\(item.symbol) \(item.label)").font(.caption)
+                    if item.requirement == .fullDiskAccess { HelperPathRow() }
                 }
             }
             Spacer(minLength: 12)
@@ -88,6 +90,29 @@ private struct FeatureGroupRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// The helper's path, to add in System Settings → Full Disk Access with + and ⌘⇧G: selectable, with a Copy button.
+private struct HelperPathRow: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(Copy.fullDiskAccessHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Text(FullDiskAccess.helperAppPath)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(FullDiskAccess.helperAppPath, forType: .string)
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.leading, 18)
     }
 }
 
