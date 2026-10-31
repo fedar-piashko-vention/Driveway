@@ -12,7 +12,7 @@ struct FormatTab: View {
     @State private var labelEdited = false
     @State private var scheme: PartitionScheme = .gpt
     @State private var wholeDisk: Bool
-    @State private var sheetShown = false
+    @State private var pending: PendingErase?
 
     init(model: DiskManagerModel, volume: Volume) {
         self.model = model
@@ -23,8 +23,12 @@ struct FormatTab: View {
     private var ready: Set<Feature> { model.readyFeatures }
     /// The choice, unless it has become unavailable since it was picked.
     private var filesystem: FilesystemKind { FormatForm.effective(chosen, ready: ready) }
-    private var target: FormatTarget { FormatForm.target(for: volume, wholeDisk: wholeDisk) }
-    private var isBusy: Bool { model.busy.contains(volume.bsdName) }
+    /// The toggle's meaning for this drive; whole media without a partition table can only be erased whole.
+    private var erasesWholeDisk: Bool { FormatForm.erasesWholeDisk(volume, toggle: wholeDisk) }
+    private var target: FormatTarget { FormatForm.target(for: volume, wholeDisk: erasesWholeDisk) }
+    private var isBusy: Bool {
+        model.formatting != nil || FormatForm.isBusy(volume, wholeDisk: erasesWholeDisk, busy: model.busy)
+    }
 
     private var nameError: String? {
         FormatMessages.inlineError(
@@ -62,12 +66,13 @@ struct FormatTab: View {
                         .foregroundStyle(.red)
                 }
 
-                Toggle("Erase the whole disk", isOn: $wholeDisk)
+                Toggle("Erase the whole disk", isOn: wholeDiskBinding)
+                    .disabled(FormatForm.isWholeDiskForced(volume))
                 Picker("Partition scheme", selection: $scheme) {
                     ForEach([PartitionScheme.gpt, .mbr], id: \.self) { Text(FormatForm.schemeTitle($0)).tag($0) }
                 }
-                .disabled(!wholeDisk)
-                if !wholeDisk {
+                .disabled(!erasesWholeDisk)
+                if !erasesWholeDisk {
                     Text("Formatting just this partition keeps the drive's partition table.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -75,18 +80,19 @@ struct FormatTab: View {
             }
             Section {
                 HStack {
-                    Button("Erase…") { sheetShown = true }
+                    Button("Erase…") {
+                        pending = PendingErase(
+                            filesystem: filesystem, label: label, scheme: scheme, target: target,
+                            wholeDisk: erasesWholeDisk)
+                    }
                         .disabled(!canErase)
                     if isBusy { ProgressView().controlSize(.small) }
                 }
             }
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $sheetShown) {
-            EraseSheet(
-                model: model, volume: volume, wholeDisk: wholeDisk,
-                request: { request(confirmation: $0) },
-                dismiss: { sheetShown = false })
+        .sheet(item: $pending) { pending in
+            EraseSheet(model: model, volume: volume, pending: pending, dismiss: { self.pending = nil })
         }
     }
 
@@ -98,7 +104,21 @@ struct FormatTab: View {
         Binding(get: { filesystem }, set: { chosen = $0 })
     }
 
-    private func request(confirmation: String) -> FormatRequest {
+    private var wholeDiskBinding: Binding<Bool> {
+        Binding(get: { erasesWholeDisk }, set: { wholeDisk = $0 })
+    }
+}
+
+/// The form as it stood when Erase… was pressed. The sheet sends exactly this, whatever happens to the form behind it.
+private struct PendingErase: Identifiable {
+    let id = UUID()
+    let filesystem: FilesystemKind
+    let label: String
+    let scheme: PartitionScheme
+    let target: FormatTarget
+    let wholeDisk: Bool
+
+    func request(confirmation: String) -> FormatRequest {
         FormatRequest(
             filesystem: filesystem, label: label, scheme: scheme, target: target, confirmation: confirmation)
     }
@@ -108,16 +128,15 @@ struct FormatTab: View {
 private struct EraseSheet: View {
     let model: DiskManagerModel
     let volume: Volume
-    let wholeDisk: Bool
-    let request: (String) -> FormatRequest
+    let pending: PendingErase
     let dismiss: () -> Void
 
     @State private var typed = ""
-    @State private var working = false
+    @State private var sent = false
 
     private var valid: Bool {
         do throws(FormatValidationError) {
-            try validate(request(typed), currentDriveName: volume.label)
+            try validate(pending.request(confirmation: typed), currentDriveName: volume.label)
             return true
         } catch {
             return false
@@ -128,38 +147,36 @@ private struct EraseSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Erase \(volume.label)?", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
-            ForEach(FormatForm.warning(for: volume, wholeDisk: wholeDisk, in: model.volumes), id: \.self) { line in
+            ForEach(
+                FormatForm.warning(for: volume, wholeDisk: pending.wholeDisk, in: model.volumes), id: \.self
+            ) { line in
                 Text(line)
             }
+            Text("New format: \(FormatForm.summary(of: pending.request(confirmation: "")))")
             Text("This can't be undone. Don't unplug the drive until it finishes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField("Type \(volume.label) to confirm", text: $typed)
-                .disabled(working)
-                .onSubmit { if valid && !working { erase() } }
+                .onSubmit { erase() }
             HStack {
-                if working { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(working)
                 Button("Erase", role: .destructive) { erase() }
-                    .disabled(!valid || working)
+                    .disabled(!valid || sent)
             }
         }
         .padding(20)
         .frame(width: 420)
-        .interactiveDismissDisabled(working)
     }
 
-    /// Sends the format. The sheet closes when it ends, whether it worked or failed; an error is then shown by the window.
+    /// Hands the format to the model and closes the sheet. The window shows the progress, and an error afterwards.
     private func erase() {
-        let formatRequest = request(typed)
-        working = true
-        Task {
-            await model.format(formatRequest, volume: volume)
-            working = false
-            dismiss()
-        }
+        guard valid, !sent else { return }
+        sent = true
+        let request = pending.request(confirmation: typed)
+        let volume = volume
+        Task { await model.format(request, volume: volume) }
+        dismiss()
     }
 }

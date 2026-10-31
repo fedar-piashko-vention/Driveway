@@ -36,6 +36,10 @@ struct DiskManagerView: View {
             detail
         }
         .frame(minWidth: 640, minHeight: 420)
+        .overlay {
+            // Kept here, not in the Format tab: the erase makes the drive leave the list, which removes the tabs.
+            if let formatting = model.formatting { FormatProgressView(formatting: formatting) }
+        }
         .task {
             model.start()
             await model.refresh()
@@ -66,7 +70,7 @@ struct DiskManagerView: View {
                 CheckRepairTab(model: model, volume: volume)
                     .tabItem { Text("Check & Repair") }
                 FormatTab(model: model, volume: volume)
-                    .id(volume.bsdName)
+                    .id("\(volume.bsdName)|\(volume.settingsKey)")
                     .tabItem { Text("Format") }
             }
             .padding()
@@ -81,6 +85,26 @@ struct DiskManagerView: View {
 
     private var errorShown: Binding<Bool> {
         Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
+    }
+}
+
+/// Covers the window while a format runs, so nothing else can be started and the warning stays in view.
+private struct FormatProgressView: View {
+    let formatting: FormatInProgress
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Formatting \(formatting.label)…").font(.headline)
+                Text(formatting.description).foregroundStyle(.secondary)
+                Text("Don't unplug the drive until it finishes.").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -21,9 +21,9 @@ struct FormatMessagesTests {
         #expect(FormatMessages.text(for: .emptyLabel) == "Enter a name")
     }
 
-    @Test func otherErrorsHaveShortSentences() throws {
+    @Test func otherErrorsHaveShortSentences() {
         for error in [FormatValidationError.confirmationMismatch, .invalidTarget, .unsupportedFilesystem] {
-            let text = try #require(FormatMessages.text(for: error))
+            let text = FormatMessages.text(for: error)
             #expect(!text.isEmpty)
             #expect(text.hasSuffix("."))
         }
@@ -123,5 +123,30 @@ struct FormatFormTests {
     @Test func schemeCopy() {
         #expect(FormatForm.schemeTitle(.gpt) == "GPT")
         #expect(FormatForm.schemeTitle(.mbr) == "MBR — for older PCs")
+    }
+
+    @Test func wholeMediaWithoutPartitionTableAlwaysErasesTheWholeDisk() {
+        let bare = vol("disk4", label: "RAW")
+        #expect(FormatForm.isWholeDiskForced(bare))
+        #expect(FormatForm.defaultsToWholeDisk(bare, in: [bare, vol("disk4s1", label: "X")]))
+        #expect(FormatForm.erasesWholeDisk(bare, toggle: false))
+        #expect(!FormatForm.isWholeDiskForced(a))
+        #expect(!FormatForm.erasesWholeDisk(a, toggle: false))
+        #expect(FormatForm.erasesWholeDisk(a, toggle: true))
+    }
+
+    @Test func busyCoversTheWholeDiskOnlyWhenErasingIt() {
+        #expect(FormatForm.isBusy(a, wholeDisk: false, busy: ["disk4s2"]))
+        #expect(!FormatForm.isBusy(a, wholeDisk: false, busy: ["disk4s3"]))
+        #expect(FormatForm.isBusy(a, wholeDisk: true, busy: ["disk4s3"]))
+        #expect(FormatForm.isBusy(a, wholeDisk: true, busy: ["disk4"]))
+        #expect(!FormatForm.isBusy(a, wholeDisk: true, busy: ["disk5s1", "disk40s1"]))
+        #expect(!FormatForm.isBusy(a, wholeDisk: true, busy: []))
+    }
+
+    @Test func summaryLeavesOutTheSchemeForAPartition() {
+        #expect(FormatForm.summary(of: req(.ntfs, "N", .wholeDisk("disk4"), scheme: .gpt)) == "NTFS · GPT · whole disk")
+        #expect(FormatForm.summary(of: req(.exfat, "N", .wholeDisk("disk4"), scheme: .mbr)) == "exFAT · MBR · whole disk")
+        #expect(FormatForm.summary(of: req(.fat32, "N", .partition("disk4s2"), scheme: .mbr)) == "FAT32 · this partition")
     }
 }

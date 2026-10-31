@@ -3,7 +3,7 @@ import Foundation
 /// What the Format tab and the helper's validation errors say.
 public enum FormatMessages {
     /// A short sentence for each validation error.
-    public static func text(for error: FormatValidationError) -> String? {
+    public static func text(for error: FormatValidationError) -> String {
         switch error {
         case .labelTooLong(let max): "Name can be at most \(max) characters"
         case .invalidCharacters: "Name contains characters this format can't use"
@@ -48,9 +48,35 @@ public enum FormatForm {
         volumes.filter { $0.wholeDisk == volume.wholeDisk }
     }
 
-    /// "Erase the whole disk" starts on when exactly one listed volume shares the disk.
+    /// Whole media with no partition table (the volume is the disk itself) can only be erased as a whole disk.
+    public static func isWholeDiskForced(_ volume: Volume) -> Bool {
+        volume.bsdName == volume.wholeDisk
+    }
+
+    /// "Erase the whole disk" starts on when exactly one listed volume shares the disk, or it can't be anything else.
     public static func defaultsToWholeDisk(_ volume: Volume, in volumes: [Volume]) -> Bool {
-        siblings(of: volume, in: volumes).count == 1
+        isWholeDiskForced(volume) || siblings(of: volume, in: volumes).count == 1
+    }
+
+    /// What the toggle means for this drive: forced on for whole media.
+    public static func erasesWholeDisk(_ volume: Volume, toggle: Bool) -> Bool {
+        isWholeDiskForced(volume) || toggle
+    }
+
+    /// True when the drive has an operation running. Erasing the whole disk also counts an operation on any other
+    /// partition of that disk, listed or not.
+    public static func isBusy(_ volume: Volume, wholeDisk: Bool, busy: Set<String>) -> Bool {
+        if busy.contains(volume.bsdName) { return true }
+        guard wholeDisk else { return false }
+        return busy.contains { $0 == volume.wholeDisk || Formatting.isPartition($0, of: volume.wholeDisk) }
+    }
+
+    /// "NTFS · GPT · whole disk", or "NTFS · this partition": reformatting a partition keeps the partition table.
+    public static func summary(of request: FormatRequest) -> String {
+        switch request.target {
+        case .wholeDisk: "\(request.filesystem.displayName) · \(request.scheme.rawValue) · whole disk"
+        case .partition: "\(request.filesystem.displayName) · this partition"
+        }
     }
 
     public static func target(for volume: Volume, wholeDisk: Bool) -> FormatTarget {
