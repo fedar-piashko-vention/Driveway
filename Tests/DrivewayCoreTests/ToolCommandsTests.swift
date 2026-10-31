@@ -94,7 +94,7 @@ private let p = ToolPaths()
         ToolCommands.ntfsclone(device: "/dev/disk4s1", imagePath: "/Users/me/b.img", paths: p)
             == Command(
                 executable: "/opt/homebrew/sbin/ntfsclone",
-                arguments: ["--save-image", "--output", "/Users/me/b.img", "/dev/disk4s1"]))
+                arguments: ["--save-image", "--force", "--output", "/Users/me/b.img", "/dev/disk4s1"]))
 }
 
 @Test func diskutilPassesArgsThrough() {
@@ -171,4 +171,10 @@ private let p = ToolPaths()
             == Command(
                 executable: "/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4",
                 arguments: ["-F", "-L", "DATA", "/dev/disk4s2"]))
+}
+
+@Test func ntfscloneForcesPastTheDirtyFlag() {
+    let c = ToolCommands.ntfsclone(device: "/dev/disk4s1", imagePath: "/Users/x/b.img", paths: p)
+    #expect(c.executable == "/opt/homebrew/sbin/ntfsclone")
+    #expect(c.arguments.contains("--force"))
 }

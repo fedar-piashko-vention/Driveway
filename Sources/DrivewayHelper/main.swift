@@ -24,8 +24,10 @@ let backendProbe = BackendProbe(runner: ProcessCommandRunner(timeout: .seconds(3
 let features = Mutex<[Feature: FeatureState]>(
     featureStates(HelperEnvironment.currentToolInventory(paths: paths, backend: .unavailable)))
 
+// Mounts keep the default time limit. Check, repair, backup and format run for as long as they take: stopping
+// ntfsclone, e2fsck or ntfsfix half-way through a large drive would do more harm than waiting.
 let service = HelperService(
-    runner: ProcessCommandRunner(), auth: SystemAuthorizationVerifier(), inventory: inventory,
+    runner: ProcessCommandRunner(), unboundedRunner: ProcessCommandRunner(timeout: nil), auth: SystemAuthorizationVerifier(), inventory: inventory,
     settings: SettingsStore(), paths: paths, backendProbe: backendProbe, osBuild: HelperEnvironment.osBuild(),
     consoleUser: { HelperEnvironment.consoleUser() },
     features: { features.withLock { $0 } },

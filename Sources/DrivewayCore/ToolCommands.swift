@@ -39,9 +39,11 @@ public enum ToolCommands {
         return Command(executable: paths.ntfsfix, arguments: [flag, device])
     }
 
-    /// Saves a metadata-only image of an NTFS volume (a safety backup before a repair).
+    /// Saves an image of an NTFS volume in ntfsclone's special format: every cluster in use (all files and
+    /// metadata, not only metadata), so it takes as long as copying the used data. A safety backup before a
+    /// repair. `--force` because the drives that need "Back up first" are the ones with the dirty flag set.
     public static func ntfsclone(device: String, imagePath: String, paths: ToolPaths) -> Command {
-        Command(executable: paths.ntfsclone, arguments: ["--save-image", "--output", imagePath, device])
+        Command(executable: paths.ntfsclone, arguments: ["--save-image", "--force", "--output", imagePath, device])
     }
 
     /// `.check` is `-n -f`, `.repair` is `-p -f`, `.repairForce` is `-y -f`.

@@ -392,7 +392,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     #expect(await h.service.handle(.backup("disk4s1", imagePath: "/dev/disk2"), authorization: auth) == .error(.commandFailed("Choose a file location for the backup image.")))
     #expect(h.runner.commands.isEmpty)
     #expect(await h.service.handle(.backup("disk4s1", imagePath: "/Users/x/b.img"), authorization: auth) == .ok)
-    #expect(h.runner.commands == [cmd(tools.ntfsclone, "--save-image", "--output", "/Users/x/b.img", "/dev/disk4s1")])
+    #expect(h.runner.commands == [cmd(tools.ntfsclone, "--save-image", "--force", "--output", "/Users/x/b.img", "/dev/disk4s1")])
 }
 
 // MARK: - Format
@@ -864,4 +864,44 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         }
     }
     #expect(h.runner.commands.isEmpty)
+}
+
+// MARK: - Final review: long operations have no time limit (I2)
+
+@Test func checkRepairBackupAndFormatRunWithoutTimeLimit() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    h.runner.script(tools.ntfsfix, "-d", exit: 0, stdout: ntfsfixOK)
+    _ = await h.service.handle(.check("disk4s1"), authorization: nil)
+    _ = await h.service.handle(.repair("disk4s1", force: false), authorization: auth)
+    _ = await h.service.handle(.fixAndMount("disk4s1"), authorization: auth)
+    _ = await h.service.handle(.backup("disk4s1", imagePath: "/Users/x/b.img"), authorization: auth)
+    let tools = Set(h.unbounded.commands.map(\.executable))
+    #expect(tools == [ToolPaths().ntfsfix, ToolPaths().ntfsclone])
+    // Mounts and unmounts keep their time limit.
+    #expect(!h.unbounded.commands.contains { $0.executable == ntfs3g || $0.arguments.first == "unmount" })
+
+    let e = makeHarness(disks: [disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")], headers: ["disk6s1": ext4Header])
+    _ = await e.service.handle(.check("disk6s1"), authorization: nil)
+    #expect(e.unbounded.commands == [cmd(ToolPaths().e2fsck, "-n", "-f", "/dev/disk6s1")])
+
+    let x = makeHarness(disks: [disk("disk5s1", kind: "exfat", name: "STICK", path: "/Volumes/STICK")])
+    _ = await x.service.handle(.repair("disk5s1", force: false), authorization: auth)
+    #expect(x.unbounded.commands == [cmd(diskutil, "repairVolume", "/dev/disk5s1")])
+}
+
+@Test func formatRunsWithoutTimeLimitButMountsWithOne() async {
+    let mbrDisk4 = disk("disk4", wholeMedia: true, kind: nil, content: "FDisk_partition_scheme", name: nil)
+    let h = makeHarness(disks: [mbrDisk4, disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")])
+    let after = [gptDisk4, efi4, disk("disk4s2", kind: "exfat", name: "DRIVEWAYTMP", path: "/Volumes/DRIVEWAYTMP")]
+    let inventory = h.inventory
+    h.runner.onRun { if $0.arguments.first == "eraseDisk" { inventory.setDisks(after) } }
+    let r = FormatRequest(filesystem: .ntfs, label: "NEW", scheme: .gpt, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    _ = await h.service.handle(.format(r), authorization: auth)
+    #expect(h.unbounded.commands == [
+        cmd(diskutil, "eraseDisk", "ExFAT", "DRIVEWAYTMP", "GPT", "/dev/disk4"),
+        cmd(diskutil, "unmount", "/dev/disk4s2"),
+        cmd(tools.mkntfs, "--quick", "--label", "NEW", "/dev/disk4s2"),
+    ])
+    #expect(h.runner.commands.last?.executable == ntfs3g)
 }

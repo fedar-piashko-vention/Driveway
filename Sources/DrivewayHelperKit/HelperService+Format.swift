@@ -56,7 +56,7 @@ extension HelperService {
         defer { shared.withLock { _ = $0.formatting.remove(key) } }
 
         for c in FormatPlanner.eraseCommands(r, paths: paths) {
-            if case .failure(let e) = await runOK(c) { return .error(e) }
+            if case .failure(let e) = await runOK(c, unbounded: true) { return .error(e) }
         }
         guard r.filesystem == .ntfs || r.filesystem == .ext4 else { return .ok }
 
@@ -79,7 +79,7 @@ extension HelperService {
         let finish = FormatPlanner.finishCommands(r, dataPartition: dataName, paths: paths)
         guard !finish.isEmpty else { return .error(.commandFailed("Couldn't plan the format. Nothing was formatted.")) }
         for c in finish {
-            if case .failure(let e) = await runOK(c) { return .error(e) }
+            if case .failure(let e) = await runOK(c, unbounded: true) { return .error(e) }
         }
 
         // Claim the new volume before the format mark goes, so macOS can't mount it ahead of Driveway.

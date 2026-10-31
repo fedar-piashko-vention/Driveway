@@ -48,3 +48,10 @@ import Testing
         _ = try await ProcessCommandRunner().run(Command(executable: "/opt/nowhere/bin/ntfs-3g", arguments: []))
     }
 }
+
+@Test func processRunnerWithoutTimeoutRunsToTheEnd() async throws {
+    let runner = ProcessCommandRunner(timeout: nil)
+    #expect(runner.timeout == nil)
+    let r = try await runner.run(Command(executable: "/bin/sleep", arguments: ["0.2"]))
+    #expect(r.exitCode == 0)
+}

@@ -9,7 +9,10 @@ import Synchronization
 /// Work on one whole disk is serialised: every request and disk event that touches a disk waits its
 /// turn in a first-in, first-out queue for that whole disk instead of being refused or dropped.
 public actor HelperService {
+    /// Runs commands with a time limit: mounts, unmounts and diskutil queries.
     let runner: any CommandRunning
+    /// Runs commands that may take hours and must never be stopped half-way: check, repair, backup, format.
+    let unboundedRunner: any CommandRunning
     let auth: any AuthorizationVerifying
     let inventory: any DiskInventoryProviding
     let store: any SettingsStoring
@@ -52,13 +55,14 @@ public actor HelperService {
     let shared = Mutex(Shared())
 
     public init(
-        runner: any CommandRunning, auth: any AuthorizationVerifying, inventory: any DiskInventoryProviding,
+        runner: any CommandRunning, unboundedRunner: (any CommandRunning)? = nil, auth: any AuthorizationVerifying, inventory: any DiskInventoryProviding,
         settings: any SettingsStoring, paths: ToolPaths, backendProbe: any BackendProbing, osBuild: String,
         consoleUser: @escaping @Sendable () -> ConsoleUser?,
         features: @escaping @Sendable () -> [Feature: FeatureState],
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.runner = runner
+        self.unboundedRunner = unboundedRunner ?? runner
         self.auth = auth
         self.inventory = inventory
         self.store = settings
@@ -333,9 +337,10 @@ public actor HelperService {
             deviceModel: d.deviceModel, settingsKey: d.settingsKey, lastError: note?.lastError)
     }
 
-    func run(_ c: Command) async -> Result<CommandResult, HelperError> {
+    /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools).
+    func run(_ c: Command, unbounded: Bool = false) async -> Result<CommandResult, HelperError> {
         do {
-            return .success(try await runner.run(c))
+            return .success(try await (unbounded ? unboundedRunner : runner).run(c))
         } catch CommandRunnerError.toolMissing(let path) {
             return .failure(.toolMissing(path))
         } catch {
@@ -344,8 +349,8 @@ public actor HelperService {
     }
 
     /// Like `run`, but a non-zero exit is a failure carrying the tool's message.
-    func runOK(_ c: Command) async -> Result<CommandResult, HelperError> {
-        switch await run(c) {
+    func runOK(_ c: Command, unbounded: Bool = false) async -> Result<CommandResult, HelperError> {
+        switch await run(c, unbounded: unbounded) {
         case .success(let r) where r.exitCode == 0: .success(r)
         case .success(let r): .failure(.commandFailed(Self.message(r, c)))
         case .failure(let e): .failure(e)

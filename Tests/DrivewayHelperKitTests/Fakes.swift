@@ -60,6 +60,19 @@ final class FakeRunner: CommandRunning {
     }
 }
 
+/// The runner the service uses for commands without a time limit. Passes every command on to `base`, so
+/// `base.commands` keeps the order of everything that ran, and records which ones came this way.
+final class UnboundedRunner: CommandRunning {
+    let base: FakeRunner
+    private let state = Mutex<[Command]>([])
+    init(base: FakeRunner) { self.base = base }
+    var commands: [Command] { state.withLock { $0 } }
+    func run(_ c: Command) async throws -> CommandResult {
+        state.withLock { $0.append(c) }
+        return try await base.run(c)
+    }
+}
+
 struct FakeAuth: AuthorizationVerifying {
     var valid: Bool
     init(valid: Bool) { self.valid = valid }
@@ -228,6 +241,8 @@ let ext4Header: Data = {
 struct Harness {
     let service: HelperService
     let runner: FakeRunner
+    /// The commands that ran without a time limit (also in `runner.commands`).
+    let unbounded: UnboundedRunner
     let inventory: FakeInventory
     let settings: MemorySettings
     let logs: Box<[String]>
@@ -240,14 +255,15 @@ func makeHarness(
     consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false
 ) -> Harness {
     let runner = FakeRunner()
+    let unbounded = UnboundedRunner(base: runner)
     let inventory = FakeInventory(disks: disks, headers: headers, boot: boot, mounted: mounted)
     let store = MemorySettings(settings, failSaves: failSaves)
     let logs = Box<[String]>([])
     let service = HelperService(
-        runner: runner, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
+        runner: runner, unboundedRunner: unbounded, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
         backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console }, features: { features },
         log: { line in logs.value.append(line) })
-    return Harness(service: service, runner: runner, inventory: inventory, settings: store, logs: logs)
+    return Harness(service: service, runner: runner, unbounded: unbounded, inventory: inventory, settings: store, logs: logs)
 }
 
 func cmd(_ executable: String, _ args: String...) -> Command { Command(executable: executable, arguments: args) }

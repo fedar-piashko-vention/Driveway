@@ -68,7 +68,8 @@ extension HelperService {
             }
             forget(d.bsdName)
         }
-        if case .failure(let e) = await runOK(ToolCommands.ntfsfix(device: "/dev/\(d.bsdName)", mode: .repair, paths: paths)) {
+        let fix = ToolCommands.ntfsfix(device: "/dev/\(d.bsdName)", mode: .repair, paths: paths)
+        if case .failure(let e) = await runOK(fix, unbounded: true) {
             if wasMounted, case .failure(let mountError) = await handBackToMacOS(d.bsdName) {
                 return .error(.commandFailed(
                     "\(Self.text(e)) The drive couldn't be mounted again: \(Self.text(mountError))"))
@@ -87,7 +88,8 @@ extension HelperService {
         var remountError: String?
         switch fs {
         case .exfat, .fat32, .fat16:
-            result = await run(ToolCommands.diskutil(mode == .check ? "verifyVolume" : "repairVolume", device, paths: paths))
+            result = await run(
+                ToolCommands.diskutil(mode == .check ? "verifyVolume" : "repairVolume", device, paths: paths), unbounded: true)
         case .ntfs:
             (result, remountError) = await whileUnmounted(d, ctx, ToolCommands.ntfsfix(device: device, mode: mode, paths: paths))
         case .ext2, .ext3, .ext4:
@@ -140,7 +142,7 @@ extension HelperService {
             }
             forget(d.bsdName)
         }
-        let result = await run(command)
+        let result = await run(command, unbounded: true)
         guard wasMounted else { return (result, nil) }
         var unmounted = d
         unmounted.volumePath = nil
