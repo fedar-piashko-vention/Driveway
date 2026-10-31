@@ -19,6 +19,10 @@ public enum Copy {
     public static func mountedBy(_ driver: String) -> String { "Mounted by \(driver)" }
     public static let autoMountNTFS = "Auto-mount NTFS read/write"
     public static let alwaysMountReadOnly = "Always mount read-only"
+
+    public static let backUpFirst = "Back up first"
+    public static let ntfsRepairNote =
+        "This fixes common issues (unclean eject, journal), not deep damage. For real damage, connect the drive to Windows and run chkdsk /f."
 }
 
 /// What a user notification says and where clicking it goes. Built from core values so Core stays independent of IPC.

@@ -17,8 +17,12 @@ final class DiskManagerModel {
     private(set) var helperReachable = true
     /// True once the helper's settings arrived. Settings are never sent before that, so defaults can't overwrite them.
     private(set) var settingsLoaded = false
-    /// Drives with an operation (eject, fix & mount) in flight.
+    /// Drives with an operation (eject, fix & mount, check, repair, back up) in flight.
     private(set) var busy: Set<String> = []
+    /// The latest check or repair report per drive, by BSD name.
+    private(set) var reports: [String: CheckReport] = [:]
+    /// Where the latest backup of each drive was saved, by BSD name.
+    private(set) var backups: [String: String] = [:]
 
     @ObservationIgnored private let client: HelperClient
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
@@ -87,6 +91,27 @@ final class DiskManagerModel {
         await operate(on: volume, .fixAndMount(volume.bsdName), authorized: true)
     }
 
+    /// Checks the drive without changing it. The report lands in `reports`.
+    func check(_ volume: Volume) async {
+        await runReport(on: volume, .check(volume.bsdName), authorized: false)
+    }
+
+    /// Repairs the drive; `force` answers yes to every question (ext only). The report lands in `reports`.
+    func repair(_ volume: Volume, force: Bool) async {
+        await runReport(on: volume, .repair(volume.bsdName, force: force), authorized: true)
+    }
+
+    /// Clones an NTFS drive into the image file at `path`.
+    func backUp(_ volume: Volume, to path: String) async {
+        let request = HelperRequest.backup(volume.bsdName, imagePath: path)
+        guard let response = await operate(on: volume, request, authorized: true) else { return }
+        if case .ok = response {
+            backups[volume.bsdName] = path
+        } else {
+            unexpected(response, for: request)
+        }
+    }
+
     func isAlwaysReadOnly(_ volume: Volume) -> Bool {
         settings.alwaysReadOnly.contains(volume.settingsKey)
     }
@@ -133,12 +158,24 @@ final class DiskManagerModel {
         if on { settings.alwaysReadOnly.insert(key) } else { settings.alwaysReadOnly.remove(key) }
     }
 
-    /// Runs a drive operation, then reloads the list (the helper's events may lag behind its reply).
-    private func operate(on volume: Volume, _ request: HelperRequest, authorized: Bool) async {
-        guard busy.insert(volume.bsdName).inserted else { return }
+    /// Runs a drive operation, then reloads the list (the helper's events may lag behind its reply). Returns the
+    /// helper's reply, or nil if the drive was busy or the request failed or was canceled.
+    @discardableResult
+    private func operate(on volume: Volume, _ request: HelperRequest, authorized: Bool) async -> HelperResponse? {
+        guard busy.insert(volume.bsdName).inserted else { return nil }
         defer { busy.remove(volume.bsdName) }
-        guard await perform(request, authorized: authorized) != nil else { return }
+        guard let response = await perform(request, authorized: authorized) else { return nil }
         await refresh()
+        return response
+    }
+
+    private func runReport(on volume: Volume, _ request: HelperRequest, authorized: Bool) async {
+        guard let response = await operate(on: volume, request, authorized: authorized) else { return }
+        if case .report(let report) = response {
+            reports[volume.bsdName] = report
+        } else {
+            unexpected(response, for: request)
+        }
     }
 
     /// Sends a request. Returns nil, after recording why, when it couldn't be sent, the user canceled the password

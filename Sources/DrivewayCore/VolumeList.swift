@@ -7,6 +7,11 @@ public enum VolumeBanner: Equatable, Sendable {
     case error(String)
 }
 
+/// What the Check & Repair tab can do for a drive.
+public enum RepairAction: Equatable, Sendable {
+    case check, backupFirst, repair, repairForce
+}
+
 /// Pure presentation rules for the Disk Manager's drive list and Info tab.
 public enum VolumeList {
     public static let managedTitle = "NTFS / ext"
@@ -42,6 +47,34 @@ public enum VolumeList {
         }
         if let error = v.lastError { return .error(error) }
         return nil
+    }
+
+    /// The buttons the Check & Repair tab offers. Back up is NTFS only (the helper clones with ntfsclone); the forced
+    /// repair answers yes to everything (`e2fsck -y`), so only ext has it.
+    public static func repairActions(for fs: FilesystemKind) -> [RepairAction] {
+        switch fs {
+        case .ntfs: [.check, .backupFirst, .repair]
+        case .ext2, .ext3, .ext4: [.check, .repair, .repairForce]
+        case .exfat, .fat32, .fat16: [.check, .repair]
+        case .other: []
+        }
+    }
+
+    /// The note shown next to the repair buttons.
+    public static func repairNote(for fs: FilesystemKind) -> String? {
+        fs == .ntfs ? Copy.ntfsRepairNote : nil
+    }
+
+    /// The save panel's default name, `<label>-<yyyy-MM-dd>.img`. The date is the user's local one, formatted in a
+    /// fixed locale so it never turns into other digits or calendars. A label can't hold a path separator.
+    public static func backupFileName(label: String, date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        let safe = String(label.map { $0 == "/" || $0 == ":" ? "-" : $0 })
+        return "\(safe.isEmpty ? "Drive" : safe)-\(formatter.string(from: date)).img"
     }
 
     /// The BSD name in a `driveway://volume/<bsd>` link (from a notification), or nil for any other URL.

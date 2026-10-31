@@ -63,7 +63,7 @@ struct DiskManagerView: View {
             TabView {
                 InfoTab(model: model, volume: volume)
                     .tabItem { Text("Info") }
-                Text("Check & Repair arrives in a later build.")
+                CheckRepairTab(model: model, volume: volume)
                     .tabItem { Text("Check & Repair") }
                 Text("Format arrives in a later build.")
                     .tabItem { Text("Format") }
