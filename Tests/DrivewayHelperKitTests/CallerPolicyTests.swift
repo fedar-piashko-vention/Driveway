@@ -88,3 +88,14 @@ private let agentPath = "/Applications/Driveway.app/Contents/Library/LoginItems/
     // Only the nested agent's executable is world-writable: found.
     #expect(CallerPolicy.bundleIsWritableByNonRoot(at: root, stat: rootOwned(writableSuffix: "MacOS/DrivewayAgent")))
 }
+
+/// The app is signed with Packaging/Driveway.entitlements; the helper must still accept it.
+@Test func shippedAppEntitlementsAreNotDangerous() throws {
+    let url = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Packaging/Driveway.entitlements")
+    let plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil)
+    let entitlements = try #require(plist as? [String: Any])
+    #expect(entitlements["com.apple.security.automation.apple-events"] as? Bool == true)
+    #expect(!CallerPolicy.hasDangerousEntitlements(entitlements))
+}

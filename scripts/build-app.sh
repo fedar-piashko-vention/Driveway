@@ -58,11 +58,13 @@ cp Packaging/app.driveway.helper.plist Packaging/app.driveway.agent.plist \
     Packaging/install-helper.sh Packaging/uninstall-helper.sh "${APP}/Contents/Resources/"
 chmod 755 "${APP}/Contents/Resources/install-helper.sh" "${APP}/Contents/Resources/uninstall-helper.sh"
 
-# Ad-hoc sign inside-out with the hardened runtime and no entitlements. The helper
-# refuses callers that lack the runtime flag.
+# Ad-hoc sign inside-out with the hardened runtime. The helper refuses callers that
+# lack the runtime flag. Only the app carries entitlements: Apple Events, so the
+# osascript it starts may drive Terminal (TCC attributes those events to the app).
 codesign --force --options runtime -s - --identifier app.driveway.helper "${HELPER}"
 codesign --force --options runtime -s - --identifier app.driveway.agent "${AGENT_APP}"
-codesign --force --options runtime -s - --identifier app.driveway.Driveway "${APP}"
+codesign --force --options runtime -s - --identifier app.driveway.Driveway \
+    --entitlements Packaging/Driveway.entitlements "${APP}"
 
 codesign --verify --deep --strict "${APP}"
 # Require the runtime flag inside the CodeDirectory flags, e.g. flags=0x10002(adhoc,runtime).

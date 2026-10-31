@@ -40,9 +40,16 @@ final class Installer {
     @ObservationIgnored private let paths: ToolPaths
     @ObservationIgnored private var brew: LineProcess?
     @ObservationIgnored private var canceled = false
+    @ObservationIgnored private var terminationObserver: (any NSObjectProtocol)?
 
     init(paths: ToolPaths = ToolPaths()) {
         self.paths = paths
+        // Quitting Driveway must not leave brew running unattended.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cancelBrew() }
+        }
     }
 
     func perform(_ step: InstallStep, log: @escaping @MainActor (String) -> Void) async throws {

@@ -144,6 +144,8 @@ public enum ConflictingDrivers {
 public enum InstallStep: Equatable, Sendable {
     case openURL(URL)
     case runBrew([String])
+    /// A command line typed into a new Terminal window. Only the fixed constants in `for(_:)` may reach it: the
+    /// command is escaped for the AppleScript string literal, but deliberately not for the shell, which runs it as is.
     case runInTerminal(String)
     case openSettings(URL)
     case installHelper
@@ -151,8 +153,9 @@ public enum InstallStep: Equatable, Sendable {
     public static func `for`(_ r: Requirement) -> InstallStep {
         switch r {
         case .homebrew: .openURL(URL(string: "https://brew.sh")!)
-        case .macFUSE: .runInTerminal("brew install --cask macfuse")
-        case .macFUSEUpdate: .runInTerminal("brew upgrade --cask macfuse")
+        // Absolute path: right after a fresh Homebrew install, brew isn't on Terminal's PATH yet.
+        case .macFUSE: .runInTerminal("\(ToolPaths().brew) install --cask macfuse")
+        case .macFUSEUpdate: .runInTerminal("\(ToolPaths().brew) upgrade --cask macfuse")
         case .macFUSEApproval(.fskit):
             .openSettings(URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
         case .macFUSEApproval(.kernel):

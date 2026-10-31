@@ -146,7 +146,9 @@ private struct InstallLogView: View {
                 Spacer()
                 if running {
                     Button("Cancel", role: .cancel) { setup.cancelBrew() }
+                    // Only while brew waits on an unfinished line, i.e. a question.
                     Button("Continue") { setup.answerYes() }
+                        .disabled(setup.installer.pendingLine.isEmpty)
                 } else {
                     Button("Done") { setup.logShown = false }
                         .keyboardShortcut(.defaultAction)

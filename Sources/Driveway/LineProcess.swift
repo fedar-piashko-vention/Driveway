@@ -2,7 +2,7 @@ import DrivewayCore
 import Foundation
 import os
 
-/// What a running program printed: a complete line, or its unfinished last line (a prompt) as it changes.
+/// What a running program printed: a complete line, or its unfinished last line on stdout (a prompt) as it changes.
 enum ProcessOutput: Sendable {
     case line(String)
     case tail(String)
@@ -63,7 +63,8 @@ final class LineProcess: @unchecked Sendable {
                 }
                 let (lines, tail) = splitter.withLock { s in (s.append(data), s.tail) }
                 for line in lines { continuation.yield(.line(line)) }
-                continuation.yield(.tail(tail))
+                // Prompts come on stdout; a stderr chunk must not blank one.
+                if pipe === out { continuation.yield(.tail(tail)) }
             }
         }
         process.terminationHandler = { _ in

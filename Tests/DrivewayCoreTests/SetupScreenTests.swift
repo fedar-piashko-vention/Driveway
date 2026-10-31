@@ -32,8 +32,8 @@ struct BackendWithoutHelperTests {
 struct TerminalScriptTests {
     @Test func doScriptInTerminal() {
         #expect(
-            TerminalScript.osascriptArguments(command: "brew install --cask macfuse")
-                == ["-e", #"tell application "Terminal" to do script "brew install --cask macfuse""#,
+            TerminalScript.osascriptArguments(command: "/opt/homebrew/bin/brew install --cask macfuse")
+                == ["-e", #"tell application "Terminal" to do script "/opt/homebrew/bin/brew install --cask macfuse""#,
                     "-e", #"tell application "Terminal" to activate"#])
     }
 
