@@ -313,7 +313,7 @@ public actor HelperService {
     /// macOS refused the helper the drive's raw device. The drive is left to macOS (read-only for NTFS), and the
     /// reason is kept in `notes`, so the notification and the Info tab both say what to do.
     private func leaveForFullDiskAccess(_ d: DiskDescription, _ fs: FilesystemKind?) async -> VolumeEvent {
-        let message = Copy.needsFullDiskAccess(label: Self.displayLabel(d))
+        let message = Copy.needsFullDiskAccess
         notes[d.bsdName] = (notes[d.bsdName]?.health ?? .unknown, message)
         if case .mountFailed(_, let error)? = await leave(
             d, fs, because: "the helper has no Full Disk Access (macOS refused to let it open /dev/r\(d.bsdName))")
@@ -485,7 +485,7 @@ public actor HelperService {
            FullDiskAccess.deniedInToolOutput(r.stderr + "\n" + r.stdout), inventory.fullDiskAccess() != true
         {
             log("\(URL(fileURLWithPath: c.executable).lastPathComponent) was refused the drive (no Full Disk Access): \(Self.message(r, c))")
-            return .failure(.commandFailed(Copy.needsFullDiskAccess(label: driveLabel(for: c))))
+            return .failure(.commandFailed(Copy.needsFullDiskAccess))
         }
         return .success(r)
     }
@@ -493,22 +493,6 @@ public actor HelperService {
     /// The tools that open a drive's raw device (or, for umount, unmount a FUSE mount from it).
     private var rawDeviceTools: Set<String> {
         [paths.ntfs3g, paths.ext4fuse, paths.ntfsfix, paths.ntfsclone, paths.mkntfs, paths.e2fsck, paths.mkfsExt4, paths.umount]
-    }
-
-    /// The label of the drive a command works on: its device (`/dev/disk4s1` or `/dev/rdisk4s1`) or mount point.
-    func driveLabel(for c: Command) -> String {
-        let disks = shared.withLock { $0.disks }
-        for argument in c.arguments {
-            if argument.hasPrefix("/dev/") {
-                var bsd = String(argument.dropFirst(5))
-                if bsd.hasPrefix("rdisk") { bsd.removeFirst() }
-                if let v = mounts[bsd] { return v.label }
-                if let d = disks.first(where: { $0.bsdName == bsd }) { return Self.displayLabel(d) }
-            }
-            if let v = mounts.values.first(where: { $0.mountPoint == argument }) { return v.label }
-            if let d = disks.first(where: { $0.volumePath == argument }) { return Self.displayLabel(d) }
-        }
-        return "this drive"
     }
 
     /// Like `run`, but a non-zero exit is a failure carrying the tool's message.

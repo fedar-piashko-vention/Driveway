@@ -75,8 +75,8 @@ struct FullDiskAccessTests {
 
     @Test func driveMessageSaysWhatToDo() {
         #expect(
-            Copy.needsFullDiskAccess(label: "2TB-SSD")
-                == "Driveway's helper needs Full Disk Access to use 2TB-SSD. Open Setup to allow it.")
+            Copy.needsFullDiskAccess
+                == "Driveway's helper needs Full Disk Access. Open Setup to allow it.")
     }
 
     @Test func probeErrnoMapping() {

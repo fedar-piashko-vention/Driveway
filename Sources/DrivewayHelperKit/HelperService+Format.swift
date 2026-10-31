@@ -48,9 +48,8 @@ extension HelperService {
         guard authorized else { return .error(.notAuthorized) }
         // mkntfs and mkfs.ext4 open the raw device: without Full Disk Access they would fail after the erase.
         if r.filesystem == .ntfs || r.filesystem == .ext4, inventory.fullDiskAccess() == false {
-            let label = Self.confirmationName(for: r, target: d, in: ctx.disks)
             log("Not formatting \(target): the helper has no Full Disk Access.")
-            return .error(.commandFailed(Copy.needsFullDiskAccess(label: label.isEmpty ? "this drive" : label)))
+            return .error(.commandFailed(Copy.needsFullDiskAccess))
         }
 
         // What was known about the erased volumes is about to be wrong. Until Driveway mounts the result,

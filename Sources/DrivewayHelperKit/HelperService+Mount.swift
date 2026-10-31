@@ -30,7 +30,7 @@ extension HelperService {
             if let detected = detection.kind {
                 fs = detected
             } else if detection.needsFullDiskAccess {
-                let message = Copy.needsFullDiskAccess(label: Self.displayLabel(d))
+                let message = Copy.needsFullDiskAccess
                 log("Couldn't mount \(d.bsdName): the helper has no Full Disk Access.")
                 return .failure(MountFailure(error: .commandFailed(message), readOnlyByMacOS: false))
             }

@@ -34,9 +34,9 @@ public enum FullDiskAccess {
 
 extension Copy {
     /// Why a drive stays read-only, or an operation failed, when the helper has no Full Disk Access.
-    public static func needsFullDiskAccess(label: String) -> String {
-        "Driveway's helper needs Full Disk Access to use \(label). Open Setup to allow it."
-    }
+    /// No drive name in it: the notification already says "Driveway couldn't mount <label>:", and the Info tab shows
+    /// it under the drive.
+    public static let needsFullDiskAccess = "Driveway's helper needs Full Disk Access. Open Setup to allow it."
 
     /// The line above the helper's path in the Setup row.
     public static let fullDiskAccessHint =

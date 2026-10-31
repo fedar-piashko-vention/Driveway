@@ -7,7 +7,7 @@ import Testing
 private let auth = Data([1, 2, 3])
 /// What `DADiskInventory.header(of:)` throws when macOS privacy protection refuses the raw device.
 private let refused = DADiskInventory.HeaderError.openFailed(EPERM)
-private let backupNeedsAccess = Copy.needsFullDiskAccess(label: "BACKUP")
+private let backupNeedsAccess = Copy.needsFullDiskAccess
 private let ntfsRefused = "Error opening '/dev/disk4s1': Operation not permitted\nFailed to mount '/dev/disk4s1': Operation not permitted\n"
 private let ntfsfixRefused = "Error opening '/dev/disk4s1': Operation not permitted\nVolume is corrupt. You should run chkdsk.\n"
 
@@ -47,7 +47,7 @@ private func leaveLog(_ h: Harness, _ bsd: String) -> String? {
     let d = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
     let h = makeHarness(disks: [d])
     h.inventory.setHeaderError(refused, for: "disk6s1")
-    let message = Copy.needsFullDiskAccess(label: "LINUX")
+    let message = Copy.needsFullDiskAccess
     let event = await h.service.diskAppeared(d)
     guard case .mountFailed(let v, message) = event else { Issue.record("expected .mountFailed, got \(String(describing: event))"); return }
     #expect(v.bsdName == "disk6s1")
@@ -125,7 +125,7 @@ private func leaveLog(_ h: Harness, _ bsd: String) -> String? {
     h.runner.script(tools.e2fsck, "-n", exit: 8, stderr: "e2fsck: Operation not permitted while trying to open /dev/disk6s1\n")
     #expect(
         await h.service.handle(.check(ref("disk6s1")), authorization: nil)
-            == .error(.commandFailed(Copy.needsFullDiskAccess(label: "LINUX"))))
+            == .error(.commandFailed(Copy.needsFullDiskAccess)))
 }
 
 @Test func backupWithoutFullDiskAccessSaysSo() async {
@@ -169,7 +169,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     h.inventory.setStuck(["/Volumes/LINUX"])
     #expect(
         await h.service.handle(.unmount(ref("disk6s1")), authorization: nil)
-            == .error(.commandFailed(Copy.needsFullDiskAccess(label: "LINUX"))))
+            == .error(.commandFailed(Copy.needsFullDiskAccess)))
 }
 
 // MARK: - Every drive left to macOS is logged with the reason
