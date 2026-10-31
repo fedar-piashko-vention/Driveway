@@ -6,16 +6,23 @@ public enum CheckMode: String, Codable, Sendable {
 
 /// The only place external tool command lines are defined. The root helper runs these.
 public enum ToolCommands {
-    /// ntfs-3g mount. Options: `[backend=fskit,]volname=<label>,uid=<uid>,gid=<gid>,norecover[,ro]`.
+    /// ntfs-3g mount. Options: `[backend=fskit,]volname=<label>,uid=<uid>,gid=<gid>,norecover,user_xattr[,ro]`.
     ///
     /// `norecover` because ntfs-3g's default, `recover`, clears the Windows logfile of a drive that wasn't
     /// unmounted properly and mounts it read/write: a silent fix. With `norecover` such a drive is refused,
     /// and Driveway falls back to a read-only mount with Fix & mount on offer.
+    ///
+    /// `user_xattr` because without it this ntfs-3g build refuses every extended attribute (ENOTSUP), and
+    /// Finder, `cp -p` and `ditto` copy a file's extended attributes (quarantine, provenance), so every copy
+    /// onto the drive failed and left a 0-byte file (live session, 2026-10-31). With it the attributes are
+    /// stored as NTFS named streams, as Windows stores its own Zone.Identifier, with no `._` files.
+    /// (`streams_interface=xattr`, documented as the same, did not help; macFUSE's `auto_xattr` works but
+    /// litters the drive with `._` files.)
     public static func ntfs3gMount(
         device: String, mountPoint: String, volumeName: String, readOnly: Bool,
         uid: UInt32, gid: UInt32, backend: MountBackend, paths: ToolPaths
     ) -> Command {
-        var options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),uid=\(uid),gid=\(gid),norecover"
+        var options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),uid=\(uid),gid=\(gid),norecover,user_xattr"
         if readOnly { options += ",ro" }
         return Command(
             executable: paths.ntfs3g,

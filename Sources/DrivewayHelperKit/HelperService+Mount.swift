@@ -284,6 +284,7 @@ extension HelperService {
                 v.usedBytes = inventory.usage(ofMountPoint: mountPoint)
                 mounts[bsd] = v
                 notes[bsd] = nil
+                log("Mounted \(bsd) at \(mountPoint) (\(fs.rawValue), \(v.access == .readWrite ? "read/write" : "read-only"), \(backend.rawValue) backend).")
                 return .mounted(v)
             }
             if backend == .fskit { recordFSKitFailure() }
@@ -308,6 +309,7 @@ extension HelperService {
     ) -> MountResult {
         notes[v.bsdName] = (notes[v.bsdName]?.health ?? .unknown, message)
         v.lastError = message
+        log("Couldn't mount \(v.bsdName): \(message)")
         return .failed(v, message, error, readOnlyByMacOS: readOnlyByMacOS)
     }
 

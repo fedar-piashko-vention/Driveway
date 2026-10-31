@@ -7,7 +7,7 @@ import Testing
 private let auth = Data([1, 2, 3])
 private let ntfs3g = tools.ntfs3g
 private let unmount4s1 = cmd(diskutil, "unmount", "/dev/disk4s1")
-private let ntfs3gBackup = cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover")
+private let ntfs3gBackup = cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover,user_xattr")
 private let ntfsfixOK = """
     Mounting volume... OK
     Processing of $MFT and $MFTMirr completed successfully.
@@ -144,7 +144,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     let ntfs = disk("disk5s1", kind: "ntfs", name: "BACKUP")
     let h2 = makeHarness(disks: [ntfs])
     let event = await h2.service.diskAppeared(ntfs)
-    #expect(h2.runner.commands == [cmd(ntfs3g, "/dev/disk5s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover")])
+    #expect(h2.runner.commands == [cmd(ntfs3g, "/dev/disk5s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover,user_xattr")])
     if case .mounted = event {} else { Issue.record("expected .mounted") }
 }
 
@@ -166,7 +166,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     guard case .mountFailed(let v, _) = event else { Issue.record("expected .mountFailed, got \(String(describing: event))"); return }
     #expect(v.bsdName == "disk4s1")
     #expect(h.runner.commands == [
-        cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover"),
+        cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover,user_xattr"),
         cmd(diskutil, "mount", "/dev/disk4s1"),
     ])
     #expect(h.settings.current.fskitFailedOnOSBuild == osBuild)
@@ -441,7 +441,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         cmd(diskutil, "eraseDisk", "ExFAT", "DRIVEWAYTMP", "GPT", "/dev/disk4"),
         cmd(diskutil, "unmount", "/dev/disk4s2"),
         cmd(tools.mkntfs, "--quick", "--label", "NEW", "/dev/disk4s2"),
-        cmd(ntfs3g, "/dev/disk4s2", "/Volumes/NEW", "-o", "volname=NEW,uid=501,gid=20,norecover"),
+        cmd(ntfs3g, "/dev/disk4s2", "/Volumes/NEW", "-o", "volname=NEW,uid=501,gid=20,norecover,user_xattr"),
     ])
     let v = mountedVolume(response)
     #expect(v?.label == "NEW")
@@ -553,7 +553,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     let (event, response) = await (appeared, unmounted)
     if case .mounted = event {} else { Issue.record("expected .mounted, got \(String(describing: event))") }
     #expect(response == .ok)
-    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover"), unmount4s1])
+    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover,user_xattr"), unmount4s1])
 }
 
 @Test func formatClearsStaleDetectionSoMacOSCanMountDuringErase() async {
@@ -688,8 +688,9 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     guard case .mountFailed = await h.service.diskAppeared(d) else { Issue.record("expected .mountFailed"); return }
     #expect(h.settings.current.fskitFailedOnOSBuild == nil)  // the save failed
     #expect(await h.service.handle(.backendStatus, authorization: nil) == .backend(.unavailable))
-    #expect(h.logs.value.count == 1)
-    #expect(h.logs.value.first?.contains(osBuild) == true)
+    // The failed save is logged (next to the mount failure itself).
+    #expect(h.logs.value.filter { $0.contains(osBuild) }.count == 1)
+    #expect(h.logs.value.contains { $0.hasPrefix("Couldn't mount disk4s1") })
 }
 
 @Test func inventoryNamesAreCheckedBeforeDevPaths() async {
