@@ -20,7 +20,11 @@ check_app_paths() {
              "${app}/Contents/Library/LaunchServices" "${app}/Contents/Resources" \
              "${app}/Contents/Library/LaunchServices/app.driveway.helper.app" \
              "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents" \
-             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS"; do
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS" \
+             "${app}/Contents/Library/Filesystems" \
+             "${app}/Contents/Library/Filesystems/driveway_ext.fs" \
+             "${app}/Contents/Library/Filesystems/driveway_ext.fs/Contents" \
+             "${app}/Contents/Library/Filesystems/driveway_ext.fs/Contents/Resources"; do
         if [[ ! -d "${d}" || -L "${d}" ]]; then
             echo "${d} is missing or a symlink." >&2
             return 64
@@ -28,7 +32,9 @@ check_app_paths() {
     done
     for d in "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS/app.driveway.helper" \
              "${app}/Contents/Resources/app.driveway.helper.plist" \
-             "${app}/Contents/Resources/app.driveway.agent.plist"; do
+             "${app}/Contents/Resources/app.driveway.agent.plist" \
+             "${app}/Contents/Library/Filesystems/driveway_ext.fs/Contents/Info.plist" \
+             "${app}/Contents/Library/Filesystems/driveway_ext.fs/Contents/Resources/driveway_ext.util"; do
         if [[ ! -f "${d}" || -L "${d}" ]]; then
             echo "${d} is missing or a symlink." >&2
             return 64
@@ -58,6 +64,10 @@ main() {
     local DAEMON_PLIST="/Library/LaunchDaemons/app.driveway.helper.plist"
     local AGENT_PLIST="/Library/LaunchAgents/app.driveway.agent.plist"
     local LOG_DIR="/Library/Logs/Driveway"
+    # Probe-only: lets macOS recognise ext partitions, so it ties Driveway's ext mounts to their disks and
+    # Finder's sidebar lists them. diskarbitrationd runs its probe as root, so it is root-owned like the helper.
+    local EXT_FS_SRC="${APP}/Contents/Library/Filesystems/driveway_ext.fs"
+    local EXT_FS_DST="/Library/Filesystems/driveway_ext.fs"
 
     # The helper only trusts callers from a root-owned, non-group/other-writable bundle.
     # ACLs could still grant others write access, so they are stripped too. `chmod -R -N` would follow
@@ -85,6 +95,14 @@ main() {
     chown -R root:wheel "${HELPER_DST}.new"
     chmod -R go-w "${HELPER_DST}.new"
     mv "${HELPER_DST}.new" "${HELPER_DST}"
+    # Staged as driveway_ext.fs.new, which diskarbitrationd ignores (no .fs suffix), then moved into place.
+    install -d -o root -g wheel -m 755 /Library/Filesystems
+    rm -rf "${EXT_FS_DST}.new"
+    ditto "${EXT_FS_SRC}" "${EXT_FS_DST}.new"
+    chown -R root:wheel "${EXT_FS_DST}.new"
+    chmod -R go-w "${EXT_FS_DST}.new"
+    rm -rf "${EXT_FS_DST}"
+    mv "${EXT_FS_DST}.new" "${EXT_FS_DST}"
     install -S -o root -g wheel -m 644 "${RES}/app.driveway.helper.plist" "${DAEMON_PLIST}"
     install -S -o root -g wheel -m 644 "${RES}/app.driveway.agent.plist" "${AGENT_PLIST}"
 
