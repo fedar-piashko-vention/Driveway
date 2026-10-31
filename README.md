@@ -2,10 +2,10 @@
 
 Driveway is a free, open-source utility that mounts NTFS drives read/write on Apple Silicon Macs. It is a free replacement for the parts of Tuxera NTFS for Mac that most people use. It does not contain a filesystem driver of its own. It orchestrates existing tools: macFUSE, ntfs-3g and e2fsprogs, installed through Homebrew.
 
-- **Auto-mount.** Plug in an NTFS drive and it mounts read/write, with or without the Driveway window open.
+- **Auto-mount.** Plug in an NTFS drive and it mounts read/write, with or without the Driveway window open. A drive plugged in before you logged in, or before Setup was finished, is mounted read/write once you log in or Setup finishes. A drive macOS holds read-only also has a **Mount read/write** button in its Info tab.
 - **Disk Manager.** A window with a sidebar of your drives and three tabs: **Info**, **Check & Repair** and **Format**.
 - **Setup.** A screen that shows which features are ready, which tools are missing, and installs them for you.
-- **Dirty drives are never changed silently.** A drive Windows did not shut down cleanly mounts read-only, and you get a notification and a **Fix & mount read/write** button.
+- **Dirty drives are never changed silently.** A drive Windows did not shut down cleanly mounts read-only, and you get a notification and a **Fix & mount read/write** button. Driveway mounts with ntfs-3g's `norecover` option, so ntfs-3g never clears the Windows journal on its own, and a drive that ntfs-3g mounts read-only anyway is reported as dirty or hibernated, not as read/write.
 
 ## Limits, stated plainly
 
@@ -37,14 +37,14 @@ Tuxera NTFS for Mac and Paragon NTFS install their own filesystem drivers, which
 4. The Setup screen opens. Click **Unlock everything**, or unlock one feature at a time:
    - The Homebrew tools install inside Setup, with live output: the `gromgit/fuse` tap formulas `ntfs-3g-mac` and `ext4fuse-mac`, and `e2fsprogs`. The tap prints "not trusted" warnings and asks for confirmation. Setup shows the question, and nothing proceeds until you click **Continue**.
    - macFUSE is different. Setup opens a Terminal window that runs `brew install --cask macfuse`, and you type your password there. Afterwards Setup may show macFUSE as **Needs approval**, with an **Open Settings** button. This is macFUSE's own approval in the normal System Settings pane (Privacy & Security, or General > Login Items & Extensions), and Setup re-checks when you come back. A restart may follow. Driveway never asks you to change Recovery or any other security setting.
-   - The Driveway helper installs with one administrator password prompt.
+   - The Driveway helper installs with one administrator password prompt. Installing it makes `/Applications/Driveway.app` owned by root (the helper only trusts an app that ordinary users can't change), so replacing or deleting the app afterwards asks for an administrator password.
 5. Plug in an NTFS drive. It should mount read/write within a few seconds.
 
 Setup opens again by itself if something goes missing later, for example after a macOS update. You can also open it from **Driveway > Setup…**.
 
 ## Uninstall Driveway
 
-Choose **Driveway > Uninstall Driveway Helper…** and confirm. This stops and removes the helper and the login agent. Then drag Driveway from Applications to the Trash.
+Choose **Driveway > Uninstall Driveway Helper…** and confirm. This stops and removes the helper and the login agent, and gives the app back to you. Then drag Driveway from Applications to the Trash.
 
 To remove it by hand, in Terminal:
 
@@ -55,7 +55,10 @@ sudo rm -f /Library/LaunchAgents/app.driveway.agent.plist \
            /Library/LaunchDaemons/app.driveway.helper.plist \
            /Library/PrivilegedHelperTools/app.driveway.helper
 sudo rm -rf /Library/Logs/Driveway
+sudo chown -R "$USER" /Applications/Driveway.app   # the helper's install made it root's
 ```
+
+Without that last line, dragging Driveway to the Trash asks for an administrator password.
 
 Your settings in `/Library/Application Support/Driveway` are kept on purpose, so a reinstall remembers your choices. Delete that folder to remove them too. macFUSE, ntfs-3g and the other Homebrew tools stay installed. Remove them with `brew uninstall` if you no longer need them.
 
@@ -74,7 +77,7 @@ CI runs on GitHub's `macos-15` (Apple Silicon) runner. That image's default Xcod
 
 ## How it works
 
-The app runs as you. A small helper runs as root, because ntfs-3g, `ntfsfix`, `mkntfs`, `e2fsck` and `mkfs.ext4` need raw disk access. The helper only accepts requests from Driveway, asks for an administrator password before anything destructive (Format, Repair, Fix), and refuses to touch the disk that holds macOS, any APFS or macOS system disk, and any disk image you did not attach for testing. Format and repair are never offered for those.
+The app runs as you. A small helper runs as root, because ntfs-3g, `ntfsfix`, `mkntfs`, `e2fsck` and `mkfs.ext4` need raw disk access. The helper only accepts requests from Driveway, asks for an administrator password before Format, Repair, Fix & mount and Back up, and refuses to touch the disk that holds macOS, any APFS or macOS system disk, and any disk image you did not attach for testing. Format and repair are never offered for those.
 
 ## Licence
 
