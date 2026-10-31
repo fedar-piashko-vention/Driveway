@@ -844,3 +844,24 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(v?.health == .dirty)
     #expect(v?.mountedBy == .macOS)
 }
+
+// MARK: - Final review: EFI is refused (I1)
+
+@Test func efiPartitionIsRefusedForEveryOperation() async {
+    let efi = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", path: "/Volumes/EFI", size: 209_715_200)
+    let efiByGUID = disk("disk5s1", kind: "msdos", content: "C12A7328-F81F-11D2-BA4B-00A0C93EC93B", name: "EFI")
+    let h = makeHarness(disks: [gptDisk4, efi, disk("disk4s2", name: "BACKUP"), efiByGUID])
+    for bsd in ["disk4s1", "disk5s1"] {
+        let requests: [HelperRequest] = [
+            .mount(bsd), .unmount(bsd), .eject(bsd), .fixAndMount(bsd), .check(bsd),
+            .repair(bsd, force: false), .backup(bsd, imagePath: "/Users/x/b.img"),
+            // Format refuses EFI before validation: even a matching name and a valid request are refused.
+            .format(FormatRequest(filesystem: .exfat, label: "X", scheme: .gpt, target: .partition(bsd), confirmation: "EFI")),
+            .format(FormatRequest(filesystem: .exfat, label: "", scheme: .gpt, target: .partition(bsd), confirmation: "nope")),
+        ]
+        for r in requests {
+            #expect(await h.service.handle(r, authorization: auth) == .error(.protectedDisk), "\(r)")
+        }
+    }
+    #expect(h.runner.commands.isEmpty)
+}

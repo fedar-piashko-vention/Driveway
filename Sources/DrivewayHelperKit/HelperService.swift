@@ -142,14 +142,15 @@ public actor HelperService {
         return Context(disks: disks, policy: policy, settings: settings)
     }
 
-    /// Name check, then lookup, then protection, then authorization. The caller holds the disk's queue.
+    /// Name check, then lookup, then protection (the EFI system partition included), then authorization.
+    /// The caller holds the disk's queue.
     private func resolve(
         _ bsd: String, request: HelperRequest, authorization: Data?
     ) async -> Result<(DiskDescription, Context), HelperError> {
         guard Self.isValidBSDName(bsd) else { return .failure(.unknownVolume) }
         guard let ctx = await context() else { return .failure(.protectedDisk) }
         guard let d = ctx.disks.first(where: { $0.bsdName == bsd }) else { return .failure(.unknownVolume) }
-        if ctx.policy.isProtected(d, allDisks: ctx.disks) { return .failure(.protectedDisk) }
+        if Self.isEFI(d) || ctx.policy.isProtected(d, allDisks: ctx.disks) { return .failure(.protectedDisk) }
         if request.requiresAuthorization, !auth.verify(authorization, right: AuthorizationRights.modifyDisk) {
             return .failure(.notAuthorized)
         }
