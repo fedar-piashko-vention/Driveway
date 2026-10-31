@@ -941,3 +941,28 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     h.inventory.setDisks([after])
     #expect(await h.service.handle(.unmount(DiskRef(v)), authorization: nil) == .ok)
 }
+
+// MARK: - Final review: the whole disk's size and unlisted partitions (I4)
+
+@Test func listedVolumesKnowTheirDiskAndItsOtherPartitions() async {
+    let disks = [
+        disk("disk4", wholeMedia: true, kind: nil, content: "GUID_partition_scheme", name: nil, size: 64_000_000_000),
+        disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", size: 209_715_200),
+        disk("disk4s2", name: "DATA", path: "/Volumes/DATA", size: 30_000_000_000),
+        disk("disk4s3", kind: nil, content: "Microsoft Basic Data", name: nil, size: 30_000_000_000),  // BitLocker
+        disk("disk4s4", kind: nil, content: "Linux Swap", name: nil, size: 2_000_000_000),
+    ]
+    let h = makeHarness(disks: disks, headers: ["disk4s2": ntfsHeader])
+    guard case .volumes(let list) = await h.service.handle(.listVolumes, authorization: nil) else { Issue.record("expected volumes"); return }
+    #expect(list.map(\.bsdName) == ["disk4s2"])
+    #expect(list.first?.diskSizeBytes == 64_000_000_000)
+    #expect(list.first?.otherPartitionCount == 2)
+
+    // A volume Driveway mounted reports the same.
+    guard case .mounted(let v) = await h.service.diskAppeared(disks[2]) else { Issue.record("expected mounted"); return }
+    #expect(v.diskSizeBytes == 64_000_000_000)
+    #expect(v.otherPartitionCount == 2)
+    guard case .volumes(let again) = await h.service.handle(.listVolumes, authorization: nil) else { Issue.record("expected volumes"); return }
+    #expect(again.first?.mountedBy == .driveway)
+    #expect(again.first?.otherPartitionCount == 2)
+}

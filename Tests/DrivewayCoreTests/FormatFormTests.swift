@@ -95,6 +95,36 @@ struct FormatFormTests {
                 == [eraseWarning(label: "DATA", capacityBytes: 2_000_000_000)])
     }
 
+    @Test func wholeDiskDefaultsOffWhenTheDiskHasPartitionsDrivewayDoesNotList() {
+        var alone = a
+        alone.otherPartitionCount = 1  // a BitLocker or swap partition the list leaves out
+        #expect(!FormatForm.defaultsToWholeDisk(alone, in: [alone, other]))
+        alone.otherPartitionCount = 0
+        #expect(FormatForm.defaultsToWholeDisk(alone, in: [alone, other]))
+    }
+
+    @Test func wholeDiskWarningUsesTheDiskSizeAndCountsUnlistedPartitions() {
+        var withSize = a
+        withSize.diskSizeBytes = 64_000_000_000
+        withSize.otherPartitionCount = 3  // PHOTOS, and two Driveway can't read
+        #expect(
+            FormatForm.warning(for: withSize, wholeDisk: true, in: [withSize, b])
+                == [eraseWarning(label: "DATA", capacityBytes: 64_000_000_000),
+                    "This also erases: PHOTOS and 2 other partitions Driveway can't read"])
+
+        var oneHidden = a
+        oneHidden.otherPartitionCount = 1
+        #expect(
+            FormatForm.warning(for: oneHidden, wholeDisk: true, in: [oneHidden])
+                == [eraseWarning(label: "DATA", capacityBytes: 2_000_000_000),
+                    "This also erases 1 other partition Driveway can't read"])
+
+        // Without the disk's size, the listed volumes are summed as before.
+        #expect(FormatForm.warning(for: a, wholeDisk: true, in: [a, b])[0] == eraseWarning(label: "DATA", capacityBytes: 5_000_000_000))
+        // A partition erase is about the partition alone.
+        #expect(FormatForm.warning(for: withSize, wholeDisk: false, in: [withSize, b]) == [eraseWarning(label: "DATA", capacityBytes: 2_000_000_000)])
+    }
+
     @Test func gatingFollowsReadyFeatures() {
         let all = Set(Feature.allCases)
         for fs in [FilesystemKind.exfat, .fat32] {

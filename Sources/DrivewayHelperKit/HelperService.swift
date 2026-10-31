@@ -229,6 +229,7 @@ public actor HelperService {
             guard !ctx.policy.isProtected(d, allDisks: ctx.disks) else { continue }
             if var v = mounts[d.bsdName] {
                 v.usedBytes = v.mountPoint.flatMap { inventory.usage(ofMountPoint: $0) }
+                (v.diskSizeBytes, v.otherPartitionCount) = Self.diskLayout(of: d, in: ctx.disks)
                 volumes.append(v)
             } else if let fs = await filesystem(of: d) {
                 volumes.append(describe(d, fs))
@@ -338,11 +339,25 @@ public actor HelperService {
         let access: AccessMode =
             d.volumePath == nil ? .notMounted : (owner == .macOS && fs.isDrivewayManaged ? .readOnly : .readWrite)
         let note = notes[d.bsdName]
+        let layout = Self.diskLayout(of: d, in: shared.withLock { $0.disks })
         return Volume(
             bsdName: d.bsdName, wholeDisk: d.wholeDisk, label: Self.displayLabel(d), filesystem: fs,
             capacityBytes: d.sizeBytes, usedBytes: d.volumePath.flatMap { inventory.usage(ofMountPoint: $0) },
             mountPoint: d.volumePath, access: access, health: note?.health ?? .unknown, mountedBy: owner,
-            deviceModel: d.deviceModel, settingsKey: d.settingsKey, lastError: note?.lastError)
+            deviceModel: d.deviceModel, settingsKey: d.settingsKey, lastError: note?.lastError,
+            diskSizeBytes: layout.diskSizeBytes, otherPartitionCount: layout.otherPartitions)
+    }
+
+    /// The size of `d`'s whole disk, and how many other partitions it has besides `d` and the EFI system
+    /// partition, whatever their filesystem: a whole-disk erase destroys them all.
+    static func diskLayout(
+        of d: DiskDescription, in disks: [DiskDescription]
+    ) -> (diskSizeBytes: Int64?, otherPartitions: Int) {
+        let size = disks.first { $0.bsdName == d.wholeDisk }?.sizeBytes
+        let others = disks.filter {
+            $0.wholeDisk == d.wholeDisk && $0.bsdName != d.wholeDisk && $0.bsdName != d.bsdName && !isEFI($0)
+        }
+        return (size, Set(others.map(\.bsdName)).count)
     }
 
     /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools).

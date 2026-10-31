@@ -54,9 +54,10 @@ public enum FormatForm {
         volume.bsdName == volume.wholeDisk
     }
 
-    /// "Erase the whole disk" starts on when exactly one listed volume shares the disk, or it can't be anything else.
+    /// "Erase the whole disk" starts on when the volume is alone on its disk (no other listed volume, and no other
+    /// partition the list leaves out), or it can't be anything else.
     public static func defaultsToWholeDisk(_ volume: Volume, in volumes: [Volume]) -> Bool {
-        isWholeDiskForced(volume) || siblings(of: volume, in: volumes).count == 1
+        isWholeDiskForced(volume) || (volume.otherPartitionCount == 0 && siblings(of: volume, in: volumes).count == 1)
     }
 
     /// What the toggle means for this drive: forced on for whole media.
@@ -84,8 +85,9 @@ public enum FormatForm {
         wholeDisk ? .wholeDisk(volume.wholeDisk) : .partition(volume.bsdName)
     }
 
-    /// The warning's lines. A partition: its own size. A whole disk: the size of every listed volume on it, and
-    /// when there are others, a second line naming them.
+    /// The warning's lines. A partition: its own size. A whole disk: the disk's size (or, when unknown, the size
+    /// of every listed volume on it), and when there are other partitions, a second line naming the listed ones
+    /// and counting those Driveway can't read.
     public static func warning(for volume: Volume, wholeDisk: Bool, in volumes: [Volume]) -> [String] {
         guard wholeDisk else {
             return [eraseWarning(label: volume.label, capacityBytes: volume.capacityBytes)]
@@ -93,11 +95,19 @@ public enum FormatForm {
         let onDisk = siblings(of: volume, in: volumes)
         let others = onDisk.filter { $0.bsdName != volume.bsdName }
         // The volume is part of its disk even if the list no longer holds it.
-        let total = onDisk.contains { $0.bsdName == volume.bsdName }
+        let listedTotal = onDisk.contains { $0.bsdName == volume.bsdName }
             ? onDisk.reduce(0) { $0 + $1.capacityBytes }
             : onDisk.reduce(volume.capacityBytes) { $0 + $1.capacityBytes }
-        var lines = [eraseWarning(label: volume.label, capacityBytes: total)]
-        if !others.isEmpty { lines.append("This also erases: " + others.map(\.label).joined(separator: ", ")) }
+        var lines = [eraseWarning(label: volume.label, capacityBytes: volume.diskSizeBytes ?? listedTotal)]
+        let unlisted = max(0, volume.otherPartitionCount - others.count)
+        let unreadable = "\(unlisted) other partition\(unlisted == 1 ? "" : "s") Driveway can't read"
+        switch (others.isEmpty, unlisted > 0) {
+        case (true, false): break
+        case (true, true): lines.append("This also erases \(unreadable)")
+        case (false, false): lines.append("This also erases: " + others.map(\.label).joined(separator: ", "))
+        case (false, true):
+            lines.append("This also erases: " + others.map(\.label).joined(separator: ", ") + " and \(unreadable)")
+        }
         return lines
     }
 
