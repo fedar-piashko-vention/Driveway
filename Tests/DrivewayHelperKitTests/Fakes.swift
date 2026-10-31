@@ -101,6 +101,7 @@ final class FakeInventory: DiskInventoryProviding {
 
     func setDisks(_ disks: [DiskDescription]) { state.withLock { $0.disks = disks } }
     func setBoot(_ boot: Set<String>) { state.withLock { $0.boot = boot } }
+    func setMounted(_ mounted: Bool) { state.withLock { $0.mounted = mounted } }
     func setReadOnlyMounts(_ paths: Set<String>) { state.withLock { $0.readOnlyMounts = paths } }
     func setStuck(_ entries: Set<String>) { state.withLock { $0.stuck = entries } }
     var headerReads: [String] { state.withLock { $0.headerReads } }

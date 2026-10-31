@@ -1092,3 +1092,42 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     }
     #expect(!e.runner.commands.contains { $0.executable == tools.e2fsck })
 }
+
+// MARK: - Final review: mount errors stay visible (I8)
+
+@Test func everyMountFailureStaysInTheList() async {
+    func lastError(_ h: Harness, _ bsd: String) async -> String? {
+        guard case .volumes(let list) = await h.service.handle(.listVolumes, authorization: nil) else { return nil }
+        return list.first { $0.bsdName == bsd }?.lastError
+    }
+    // ntfs-3g couldn't be run.
+    let missing = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    missing.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
+    guard case .mountFailed = await missing.service.diskAppeared(disk("disk4s1", name: "BACKUP")) else { Issue.record("expected mountFailed"); return }
+    #expect(await lastError(missing, "disk4s1") == "\(ntfs3g) is not installed.")
+
+    // The mount never appeared.
+    let vanished = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader], mounted: false)
+    _ = await vanished.service.diskAppeared(disk("disk4s1", name: "BACKUP"))
+    #expect(await lastError(vanished, "disk4s1") == "The drive didn't appear in Finder after mounting.")
+
+    // ext4fuse failed.
+    let linux = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
+    let ext = makeHarness(disks: [linux], headers: ["disk6s1": ext4Header])
+    ext.runner.script(tools.ext4fuse, "/dev/disk6s1", exit: 1, stderr: "ext4fuse: bad superblock\n")
+    guard case .mountFailed = await ext.service.diskAppeared(linux) else { Issue.record("expected mountFailed"); return }
+    #expect(await lastError(ext, "disk6s1") == "ext4fuse: bad superblock")
+
+    // macOS's mount couldn't be undone first.
+    let busy = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    busy.runner.script(diskutil, "unmount", exit: 1, stderr: "Unmount failed: in use\n")
+    _ = await busy.service.diskAppeared(disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP"))
+    #expect(await lastError(busy, "disk4s1") == "Unmount failed: in use")
+
+    // A later successful mount clears it.
+    let fixedRunner = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader], mounted: false)
+    _ = await fixedRunner.service.diskAppeared(disk("disk4s1", name: "BACKUP"))
+    fixedRunner.inventory.setMounted(true)
+    _ = await fixedRunner.service.handle(.mount(ref("disk4s1")), authorization: nil)
+    #expect(await lastError(fixedRunner, "disk4s1") == nil)
+}

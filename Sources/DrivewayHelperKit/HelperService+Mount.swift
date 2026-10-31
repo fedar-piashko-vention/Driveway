@@ -210,7 +210,7 @@ extension HelperService {
         if d.volumePath != nil {
             if case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) {
                 shared.withLock { _ = $0.claimed.remove(bsd) }
-                return .failed(v, Self.text(e), e, readOnlyByMacOS: false)
+                return failed(&v, Self.text(e), e, readOnlyByMacOS: false)
             }
             v.mountPoint = nil
             v.access = .notMounted
@@ -231,7 +231,7 @@ extension HelperService {
         case .failure(let e):
             var readOnly = false
             if fs == .ntfs { readOnly = await handBack(bsd) } else { release(bsd) }
-            return .failed(v, Self.text(e), e, readOnlyByMacOS: readOnly)
+            return failed(&v, Self.text(e), e, readOnlyByMacOS: readOnly)
         case .success(let r): result = r
         }
 
@@ -264,18 +264,26 @@ extension HelperService {
             if backend == .fskit { recordFSKitFailure() }
             let message = "The drive didn't appear in Finder after mounting."
             let readOnly = await handBack(bsd)
-            v.lastError = message
-            return .failed(v, message, .commandFailed(message), readOnlyByMacOS: readOnly)
+            return failed(&v, message, .commandFailed(message), readOnlyByMacOS: readOnly)
         }
 
         guard fs == .ntfs else {
             release(bsd)
             let message = Self.message(result, command)
-            v.lastError = message
-            return .failed(v, message, .commandFailed(message), readOnlyByMacOS: false)
+            return failed(&v, message, .commandFailed(message), readOnlyByMacOS: false)
         }
         let outcome = NTFSMountOutcome.classify(exitCode: result.exitCode, stderr: result.stderr)
         return await fallBackToMacOS(d, fs, v, outcome: outcome, result: result, command: command)
+    }
+
+    /// A mount that failed: the message is kept in `notes`, so the drive's Info tab keeps showing it until the
+    /// drive is mounted, or removed.
+    private func failed(
+        _ v: inout Volume, _ message: String, _ error: HelperError, readOnlyByMacOS: Bool
+    ) -> MountResult {
+        notes[v.bsdName] = (notes[v.bsdName]?.health ?? .unknown, message)
+        v.lastError = message
+        return .failed(v, message, error, readOnlyByMacOS: readOnlyByMacOS)
     }
 
     /// Driveway's NTFS mount didn't give a clean read/write volume: records why, and lets macOS mount the
@@ -297,7 +305,10 @@ extension HelperService {
         v.health = fallback.health
         v.lastError = fallback.reason
         if case .failure(let e) = await handBackToMacOS(bsd) {
-            return .failed(v, fallback.reason ?? Self.text(e), e, readOnlyByMacOS: false)
+            let message = fallback.reason ?? Self.text(e)
+            notes[bsd] = (fallback.health, message)
+            v.lastError = message
+            return .failed(v, message, e, readOnlyByMacOS: false)
         }
         var ro = describe(await refreshed(d), fs)
         ro.mountedBy = .macOS
