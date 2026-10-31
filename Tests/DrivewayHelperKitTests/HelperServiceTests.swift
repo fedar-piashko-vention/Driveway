@@ -349,8 +349,9 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
 @Test func checkUnmountsRunsDryRunAndRemounts() async {
     let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
     h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    _ = await h.service.handle(.mount(ref("disk4s1")), authorization: nil)  // Driveway holds it
     let response = await h.service.handle(.check(ref("disk4s1")), authorization: nil)
-    #expect(h.runner.commands == [unmount4s1, cmd(tools.ntfsfix, "-n", "/dev/disk4s1"), ntfs3gBackup])
+    #expect(h.runner.commands == [unmount4s1, ntfs3gBackup, unmount4s1, cmd(tools.ntfsfix, "-n", "/dev/disk4s1"), ntfs3gBackup])
     guard case .report(let r) = response else { Issue.record("expected report"); return }
     #expect(r.succeeded == NTFSFixReport.parse(ntfsfixOK).succeeded)
     #expect(r.succeeded)
@@ -588,9 +589,10 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
 
 @Test func checkReportsRemountFailure() async {
     let missing = "\(ntfs3g) is not installed."
-    // ntfs-3g fails, macOS's read-only mount comes back.
+    // Driveway held it; mounting it again with ntfs-3g fails, and macOS's read-only mount comes back.
     let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
     h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    _ = await h.service.handle(.mount(ref("disk4s1")), authorization: nil)
     h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
     guard case .report(let r) = await h.service.handle(.check(ref("disk4s1")), authorization: nil) else {
         Issue.record("expected report")
@@ -604,6 +606,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     // ntfs-3g fails and macOS can't mount it either.
     let h2 = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
     h2.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    _ = await h2.service.handle(.mount(ref("disk4s1")), authorization: nil)
     h2.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
     h2.runner.script(diskutil, "mount", exit: 1, stderr: "busy")
     guard case .report(let r2) = await h2.service.handle(.check(ref("disk4s1")), authorization: nil) else {
@@ -617,11 +620,13 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
 @Test func backupReportsRemountFailure() async {
     let missing = "\(ntfs3g) is not installed."
     let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    _ = await h.service.handle(.mount(ref("disk4s1")), authorization: nil)
     h.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
     #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/x/b.img"), authorization: auth) == .error(.commandFailed(
         "The backup was saved. The drive is now mounted read-only by macOS, because mounting it with Driveway failed: \(missing)")))
 
     let h2 = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    _ = await h2.service.handle(.mount(ref("disk4s1")), authorization: nil)
     h2.runner.fail(ntfs3g, "/dev/disk4s1", with: CommandRunnerError.toolMissing(ntfs3g))
     h2.runner.script(diskutil, "mount", exit: 1, stderr: "busy")
     #expect(await h2.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/x/b.img"), authorization: auth) == .error(.commandFailed(
@@ -1142,4 +1147,32 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     fixedRunner.inventory.setMounted(true)
     _ = await fixedRunner.service.handle(.mount(ref("disk4s1")), authorization: nil)
     #expect(await lastError(fixedRunner, "disk4s1") == nil)
+}
+
+// MARK: - Final review: a drive goes back to its previous owner (M2)
+
+@Test func driveMacOSHeldGoesBackToMacOSAfterCheckRepairOrBackup() async {
+    for request in [HelperRequest.check(ref("disk4s1")), .repair(ref("disk4s1"), force: false),
+                    .backup(ref("disk4s1"), imagePath: "/Users/x/b.img")] {
+        let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+        h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+        h.runner.script(tools.ntfsfix, "-d", exit: 0, stdout: ntfsfixOK)
+        _ = await h.service.handle(request, authorization: auth)
+        #expect(h.runner.commands.last == cmd(diskutil, "mount", "/dev/disk4s1"), "\(request)")
+        #expect(!h.runner.commands.contains { $0.executable == ntfs3g }, "\(request)")
+    }
+
+    // macOS can't mount it again: said next to the report.
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP", path: "/Volumes/BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    h.runner.script(diskutil, "mount", exit: 1, stderr: "busy")
+    guard case .report(let r) = await h.service.handle(.check(ref("disk4s1")), authorization: nil) else { Issue.record("expected report"); return }
+    #expect(r.summary == "ntfsfix found nothing it can fix. The drive couldn't be mounted again: busy")
+}
+
+@Test func unmountedDriveStaysUnmountedAfterCheck() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(tools.ntfsfix, "-n", exit: 0, stdout: ntfsfixOK)
+    _ = await h.service.handle(.check(ref("disk4s1")), authorization: nil)
+    #expect(h.runner.commands == [cmd(tools.ntfsfix, "-n", "/dev/disk4s1")])
 }

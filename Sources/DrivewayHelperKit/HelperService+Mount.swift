@@ -125,15 +125,21 @@ extension HelperService {
         }
     }
 
-    /// Unmounts `d` if it is mounted, runs `command`, then mounts it again. The second value is a sentence
-    /// describing a remount that didn't go as before: read-only by macOS, or not mounted at all.
+    /// Unmounts `d` if it is mounted, runs `command`, then gives the drive back to whoever held it: Driveway
+    /// mounts it again only if Driveway held it; otherwise macOS (or the driver that had it) mounts it. The second
+    /// value is a sentence describing a remount that didn't go as before: read-only by macOS, or not mounted at all.
     func whileUnmounted(
         _ d: DiskDescription, _ ctx: Context, _ command: Command
     ) async -> (Result<CommandResult, HelperError>, String?) {
-        let wasMounted = d.volumePath != nil || mounts[d.bsdName] != nil
+        let heldByDriveway = mounts[d.bsdName] != nil
+        let wasMounted = d.volumePath != nil || heldByDriveway
         if let e = await unmountForRawAccess(d) { return (.failure(e), nil) }
         let result = await run(command, unbounded: true)
         guard wasMounted else { return (result, nil) }
+        guard heldByDriveway else {
+            guard case .failure(let e) = await handBackToMacOS(d.bsdName) else { return (result, nil) }
+            return (result, Self.remountNote(MountFailure(error: e, readOnlyByMacOS: false)))
+        }
         var unmounted = d
         unmounted.volumePath = nil
         guard case .failure(let f) = await mountOutcome(unmounted, ctx) else { return (result, nil) }
