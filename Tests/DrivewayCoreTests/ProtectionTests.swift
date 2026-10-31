@@ -88,6 +88,22 @@ struct ProtectionTests {
         }
     }
 
+    @Test func coreStorageAndAppleRAIDAreProtected() {
+        let policy = ProtectionPolicy()
+        let types = [
+            "53746F72-6167-11AA-AA11-00306543ECAC",  // CoreStorage
+            "52414944-0000-11AA-AA11-00306543ECAC",  // Apple RAID
+            "52414944-5F4F-11AA-AA11-00306543ECAC",  // Apple RAID, offline
+            "Apple_CoreStorage", "Apple_RAID", "Apple_RAID_Offline",
+        ]
+        for type in types {
+            let member = disk("disk12s2", whole: "disk12", content: type)
+            let ntfs = disk("disk12s3", whole: "disk12", kind: "ntfs", content: "Microsoft Basic Data")
+            #expect(policy.isProtected(member, allDisks: [member, ntfs]), "\(type)")
+            #expect(policy.isProtected(ntfs, allDisks: [member, ntfs]), "\(type)")
+        }
+    }
+
     @Test func matchingIsCaseInsensitive() {
         let policy = ProtectionPolicy()
         let upperKind = disk("disk12s1", whole: "disk12", kind: "APFS")
