@@ -36,6 +36,11 @@ struct CheckRepairTab: View {
                         }
                         if isBusy { ProgressView().controlSize(.small) }
                     }
+                    if volume.filesystem.isDrivewayManaged {
+                        Text("Check and Repair unmount the drive while they run.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if let path = model.backups[volume.bsdName] {
                         Label("Backup saved to \(path)", systemImage: "checkmark.circle")
                             .textSelection(.enabled)
@@ -43,7 +48,7 @@ struct CheckRepairTab: View {
                 }
             }
             if let report = model.reports[volume.bsdName] {
-                Section("Last result") { ReportView(report: report) }
+                Section("Last result: \(Self.title(report.mode))") { ReportView(report: report) }
             }
         }
         .formStyle(.grouped)
@@ -72,6 +77,14 @@ struct CheckRepairTab: View {
             "Driveway will unmount \(volume.label), repair it and mount it again. Programs using files on it will be interrupted. Don't unplug the drive until it finishes."
         if let note = VolumeList.repairNote(for: volume.filesystem) { text += "\n\n" + note }
         return text
+    }
+
+    private static func title(_ mode: CheckMode) -> String {
+        switch mode {
+        case .check: "Check"
+        case .repair: "Repair"
+        case .repairForce: "Repair (force)"
+        }
     }
 
     private static func title(_ action: RepairAction) -> String {

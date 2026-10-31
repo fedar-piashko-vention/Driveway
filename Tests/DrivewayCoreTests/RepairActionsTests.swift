@@ -44,4 +44,13 @@ struct RepairActionsTests {
         #expect(VolumeList.backupFileName(label: "a/b:c", date: date, timeZone: utc) == "a-b-c-1970-01-01.img")
         #expect(VolumeList.backupFileName(label: "", date: date, timeZone: utc) == "Drive-1970-01-01.img")
     }
+
+    @Test func backupTargetInsideTheMountPoint() {
+        #expect(VolumeList.isInside(path: "/Volumes/Data/backup.img", mountPoint: "/Volumes/Data"))
+        #expect(VolumeList.isInside(path: "/Volumes/Data/a/b.img", mountPoint: "/Volumes/Data"))
+        #expect(VolumeList.isInside(path: "/volumes/data/b.img", mountPoint: "/Volumes/Data"))
+        #expect(!VolumeList.isInside(path: "/Volumes/Data 2/b.img", mountPoint: "/Volumes/Data"))
+        #expect(!VolumeList.isInside(path: "/Volumes/Other/b.img", mountPoint: "/Volumes/Data"))
+        #expect(!VolumeList.isInside(path: "/Users/me/b.img", mountPoint: nil))
+    }
 }

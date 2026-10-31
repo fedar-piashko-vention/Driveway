@@ -77,6 +77,17 @@ public enum VolumeList {
         return "\(safe.isEmpty ? "Drive" : safe)-\(formatter.string(from: date)).img"
     }
 
+    /// True when `path` is the mount point or inside it. Whole components are compared, ignoring case (macOS volumes
+    /// are usually case-insensitive), so "/Volumes/Data 2/x" is not inside "/Volumes/Data". Both paths should already
+    /// be standardized.
+    public static func isInside(path: String, mountPoint: String?) -> Bool {
+        guard let mountPoint, !mountPoint.isEmpty else { return false }
+        func components(_ p: String) -> [String] { URL(fileURLWithPath: p).pathComponents.map { $0.lowercased() } }
+        let root = components(mountPoint)
+        let target = components(path)
+        return target.count >= root.count && Array(target.prefix(root.count)) == root
+    }
+
     /// The BSD name in a `driveway://volume/<bsd>` link (from a notification), or nil for any other URL.
     public static func bsdName(from url: URL) -> String? {
         guard url.scheme == "driveway", url.host() == "volume" else { return nil }

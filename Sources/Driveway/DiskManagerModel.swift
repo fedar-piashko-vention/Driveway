@@ -56,7 +56,13 @@ final class DiskManagerModel {
         let token = gate.beginRefresh()
         guard let listed = await perform(.listVolumes) else { return }
         if case .volumes(let volumes) = listed {
-            if gate.acceptsVolumes(from: token) { self.volumes = volumes }
+            if gate.acceptsVolumes(from: token) {
+                self.volumes = volumes
+                // BSD names get reused by later drives, so a gone drive's results must not carry over.
+                let present = Set(volumes.map(\.bsdName))
+                reports = reports.filter { present.contains($0.key) }
+                backups = backups.filter { present.contains($0.key) }
+            }
         } else {
             unexpected(listed, for: .listVolumes)
         }
@@ -91,7 +97,7 @@ final class DiskManagerModel {
         await operate(on: volume, .fixAndMount(volume.bsdName), authorized: true)
     }
 
-    /// Checks the drive without changing it. The report lands in `reports`.
+    /// Checks the drive. NTFS and ext drives are unmounted while it runs. The report lands in `reports`.
     func check(_ volume: Volume) async {
         await runReport(on: volume, .check(volume.bsdName), authorized: false)
     }
@@ -102,9 +108,14 @@ final class DiskManagerModel {
     }
 
     /// Clones an NTFS drive into the image file at `path`.
+    /// Refuses a target on the drive itself: the image can't be a backup there, and it would grow while it's written.
     func backUp(_ volume: Volume, to path: String) async {
+        if VolumeList.isInside(path: Self.resolved(path), mountPoint: volume.mountPoint.map(Self.resolved)) {
+            errorMessage = "Save the backup on a different drive."
+            return
+        }
         let request = HelperRequest.backup(volume.bsdName, imagePath: path)
-        guard let response = await operate(on: volume, request, authorized: true) else { return }
+        guard case .reply(let response) = await operate(on: volume, request, authorized: true) else { return }
         if case .ok = response {
             backups[volume.bsdName] = path
         } else {
@@ -136,6 +147,13 @@ final class DiskManagerModel {
 
     // MARK: - Private
 
+    /// The path with symlinks in its folders resolved (the file itself may not exist yet).
+    private static func resolved(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let folder = url.deletingLastPathComponent().resolvingSymlinksInPath()
+        return url.pathComponents.count > 1 ? folder.appendingPathComponent(url.lastPathComponent).path : url.path
+    }
+
     /// Sends the current settings. While this runs, and after it, refreshes started earlier don't replace them.
     private func saveSettings() async -> Bool {
         gate.settingsWriteStarted()
@@ -158,22 +176,44 @@ final class DiskManagerModel {
         if on { settings.alwaysReadOnly.insert(key) } else { settings.alwaysReadOnly.remove(key) }
     }
 
-    /// Runs a drive operation, then reloads the list (the helper's events may lag behind its reply). Returns the
-    /// helper's reply, or nil if the drive was busy or the request failed or was canceled.
+    /// How a drive operation ended.
+    private enum Operation {
+        /// The helper answered; the drive's list was reloaded.
+        case reply(HelperResponse)
+        /// The helper answered with an error (already shown). The drive's list was reloaded, since a failed operation
+        /// can leave it unmounted or mounted differently.
+        case failed
+        /// Nothing happened: the drive was busy, the request couldn't be sent, or the user canceled the prompt.
+        case notRun
+    }
+
+    /// Runs a drive operation, then reloads the list (the helper's events may lag behind its reply).
     @discardableResult
-    private func operate(on volume: Volume, _ request: HelperRequest, authorized: Bool) async -> HelperResponse? {
-        guard busy.insert(volume.bsdName).inserted else { return nil }
+    private func operate(on volume: Volume, _ request: HelperRequest, authorized: Bool) async -> Operation {
+        guard busy.insert(volume.bsdName).inserted else { return .notRun }
         defer { busy.remove(volume.bsdName) }
-        guard let response = await perform(request, authorized: authorized) else { return nil }
-        await refresh()
-        return response
+        switch await send(request, authorized: authorized) {
+        case .notSent:
+            return .notRun
+        case .helperError:
+            await refresh()
+            return .failed
+        case .reply(let response):
+            await refresh()
+            return .reply(response)
+        }
     }
 
     private func runReport(on volume: Volume, _ request: HelperRequest, authorized: Bool) async {
-        guard let response = await operate(on: volume, request, authorized: authorized) else { return }
-        if case .report(let report) = response {
+        switch await operate(on: volume, request, authorized: authorized) {
+        case .notRun:
+            break
+        case .failed:
+            // The earlier report is out of date now, and would sit next to the error.
+            reports[volume.bsdName] = nil
+        case .reply(.report(let report)):
             reports[volume.bsdName] = report
-        } else {
+        case .reply(let response):
             unexpected(response, for: request)
         }
     }
@@ -181,6 +221,19 @@ final class DiskManagerModel {
     /// Sends a request. Returns nil, after recording why, when it couldn't be sent, the user canceled the password
     /// prompt, or the helper answered with an error.
     private func perform(_ request: HelperRequest, authorized: Bool = false) async -> HelperResponse? {
+        if case .reply(let response) = await send(request, authorized: authorized) { return response }
+        return nil
+    }
+
+    private enum Sent {
+        case reply(HelperResponse)
+        /// The helper answered with an error, now in `errorMessage`.
+        case helperError
+        /// Unreachable, canceled, or failed on the way; the reason was recorded unless the user canceled.
+        case notSent
+    }
+
+    private func send(_ request: HelperRequest, authorized: Bool) async -> Sent {
         let response: HelperResponse
         do {
             response = try await client.send(request, authorized: authorized)
@@ -188,19 +241,19 @@ final class DiskManagerModel {
             logger.notice("The helper is unreachable: \(detail, privacy: .public)")
             helperReachable = false
             scheduleRetry()
-            return nil
+            return .notSent
         } catch AuthorizerError.canceled {
-            return nil
+            return .notSent
         } catch {
             errorMessage = error.localizedDescription
-            return nil
+            return .notSent
         }
         helperReachable = true
         if case .error(let error) = response {
             errorMessage = error.message
-            return nil
+            return .helperError
         }
-        return response
+        return .reply(response)
     }
 
     private func unexpected(_ response: HelperResponse, for request: HelperRequest) {
