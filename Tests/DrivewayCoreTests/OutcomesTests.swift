@@ -88,3 +88,30 @@ import Testing
     let data = try JSONEncoder().encode(report)
     #expect(try JSONDecoder().decode(CheckReport.self, from: data) == report)
 }
+
+// MARK: - ntfs-3g exited 0 but fell back to read-only
+
+private let hibernatedFallback = """
+    Windows is hibernated, refused to mount.
+    Falling back to read-only mount because the NTFS partition is in an
+    unsafe state. Please resume and shutdown Windows fully (no hibernation
+    or fast restarting.)
+    """
+
+@Test func successfulMountThatIsReallyReadWrite() {
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: false, output: "") == .mounted)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: nil, output: "") == .mounted)
+}
+
+@Test func successfulMountThatFellBackToReadOnly() {
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: hibernatedFallback) == .hibernated)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "Metadata kept in Windows cache") == .hibernated)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "Fast Restart is on") == .hibernated)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "The file system wasn't safely closed on Windows.") == .dirty)
+    // A read-only mount nobody asked for, whatever the output says: not clean, so treated as unclean.
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: true, output: "") == .dirty)
+    // The mount table can't tell, but the output says it fell back.
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: nil, output: "Falling back to read-only mount because the NTFS partition is in an unsafe state") == .dirty)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: false, output: "Volume was not unmounted properly") == .dirty)
+    #expect(NTFSMountOutcome.afterSuccessfulMount(mountIsReadOnly: false, output: "HIBERNATED") == .hibernated)
+}

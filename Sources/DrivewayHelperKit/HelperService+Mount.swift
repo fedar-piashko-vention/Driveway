@@ -226,6 +226,19 @@ extension HelperService {
 
         if result.exitCode == 0 {
             if await inventory.isMounted(at: mountPoint) {
+                // ntfs-3g exits 0 when it falls back to a read-only mount (a hibernated volume, say). That
+                // mount is not the read/write one Driveway promised: treat it like exit 14 or 15.
+                if fs == .ntfs {
+                    let outcome = NTFSMountOutcome.afterSuccessfulMount(
+                        mountIsReadOnly: inventory.mountIsReadOnly(mountPoint), output: result.stderr + "\n" + result.stdout)
+                    if outcome != .mounted {
+                        log("ntfs-3g mounted \(bsd) read-only (\(outcome)); handing it to macOS read-only.")
+                        if case .failure(let e) = await runOK(ToolCommands.unmount(device: device, paths: paths)) {
+                            return keepReadOnlyMount(v, d, fs, mountPoint: mountPoint, backend: backend, outcome: outcome, unmountError: e)
+                        }
+                        return await fallBackToMacOS(d, fs, v, outcome: outcome, result: result, command: command)
+                    }
+                }
                 v.mountPoint = mountPoint
                 v.access = fs == .ntfs ? .readWrite : .readOnly
                 v.health = fs == .ntfs ? .clean : .unknown
@@ -251,6 +264,17 @@ extension HelperService {
             return .failed(v, message, .commandFailed(message), readOnlyByMacOS: false)
         }
         let outcome = NTFSMountOutcome.classify(exitCode: result.exitCode, stderr: result.stderr)
+        return await fallBackToMacOS(d, fs, v, outcome: outcome, result: result, command: command)
+    }
+
+    /// Driveway's NTFS mount didn't give a clean read/write volume: records why, and lets macOS mount the
+    /// drive read-only instead.
+    private func fallBackToMacOS(
+        _ d: DiskDescription, _ fs: FilesystemKind, _ v: Volume, outcome: NTFSMountOutcome, result: CommandResult,
+        command: Command
+    ) async -> MountResult {
+        let bsd = d.bsdName
+        var v = v
         let fallback = readOnlyFallback(after: outcome)
         let reason: ReadOnlyReason =
             switch outcome {
@@ -268,6 +292,28 @@ extension HelperService {
         ro.mountedBy = .macOS
         ro.access = .readOnly
         return .readOnly(ro, reason)
+    }
+
+    /// ntfs-3g fell back to read-only and Driveway's mount couldn't be unmounted: it stays, recorded as what
+    /// it is, a read-only Driveway mount.
+    private func keepReadOnlyMount(
+        _ v: Volume, _ d: DiskDescription, _ fs: FilesystemKind, mountPoint: String, backend: MountBackend,
+        outcome: NTFSMountOutcome, unmountError: HelperError
+    ) -> MountResult {
+        let bsd = d.bsdName
+        let fallback = readOnlyFallback(after: outcome)
+        log("Couldn't unmount \(bsd)'s read-only mount: \(Self.text(unmountError))")
+        var v = v
+        v.mountPoint = mountPoint
+        v.access = .readOnly
+        v.health = fallback.health
+        v.mountedBy = .driveway
+        v.backend = backend
+        v.lastError = nil
+        v.usedBytes = inventory.usage(ofMountPoint: mountPoint)
+        mounts[bsd] = v
+        notes[bsd] = (fallback.health, nil)
+        return .readOnly(v, outcome == .hibernated ? .hibernated : .dirty)
     }
 
     /// FSKit exited 0 but nothing mounted. Remembered in memory first, so a failed save can't make the

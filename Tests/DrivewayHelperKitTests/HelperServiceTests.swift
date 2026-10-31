@@ -7,7 +7,7 @@ import Testing
 private let auth = Data([1, 2, 3])
 private let ntfs3g = tools.ntfs3g
 private let unmount4s1 = cmd(diskutil, "unmount", "/dev/disk4s1")
-private let ntfs3gBackup = cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20")
+private let ntfs3gBackup = cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover")
 private let ntfsfixOK = """
     Mounting volume... OK
     Processing of $MFT and $MFTMirr completed successfully.
@@ -144,7 +144,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     let ntfs = disk("disk5s1", kind: "ntfs", name: "BACKUP")
     let h2 = makeHarness(disks: [ntfs])
     let event = await h2.service.diskAppeared(ntfs)
-    #expect(h2.runner.commands == [cmd(ntfs3g, "/dev/disk5s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20")])
+    #expect(h2.runner.commands == [cmd(ntfs3g, "/dev/disk5s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover")])
     if case .mounted = event {} else { Issue.record("expected .mounted") }
 }
 
@@ -166,7 +166,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     guard case .mountFailed(let v, _) = event else { Issue.record("expected .mountFailed, got \(String(describing: event))"); return }
     #expect(v.bsdName == "disk4s1")
     #expect(h.runner.commands == [
-        cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20"),
+        cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover"),
         cmd(diskutil, "mount", "/dev/disk4s1"),
     ])
     #expect(h.settings.current.fskitFailedOnOSBuild == osBuild)
@@ -425,7 +425,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         cmd(diskutil, "eraseDisk", "ExFAT", "DRIVEWAYTMP", "GPT", "/dev/disk4"),
         cmd(diskutil, "unmount", "/dev/disk4s2"),
         cmd(tools.mkntfs, "--quick", "--label", "NEW", "/dev/disk4s2"),
-        cmd(ntfs3g, "/dev/disk4s2", "/Volumes/NEW", "-o", "volname=NEW,uid=501,gid=20"),
+        cmd(ntfs3g, "/dev/disk4s2", "/Volumes/NEW", "-o", "volname=NEW,uid=501,gid=20,norecover"),
     ])
     let v = mountedVolume(response)
     #expect(v?.label == "NEW")
@@ -537,7 +537,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     let (event, response) = await (appeared, unmounted)
     if case .mounted = event {} else { Issue.record("expected .mounted, got \(String(describing: event))") }
     #expect(response == .ok)
-    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20"), unmount4s1])
+    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover"), unmount4s1])
 }
 
 @Test func formatClearsStaleDetectionSoMacOSCanMountDuringErase() async {
@@ -785,4 +785,62 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     let before = h.runner.commands.count
     _ = await service.handle(.mount("disk4s1"), authorization: nil)
     #expect(h.runner.commands.count > before)
+}
+
+// MARK: - Final review: read-only fallback after exit 0 (C2)
+
+@Test func exitZeroReadOnlyHibernatedFallsBackLikeExit14() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(ntfs3g, "/dev/disk4s1", exit: 0, stderr: """
+        Windows is hibernated, refused to mount.
+        Falling back to read-only mount because the NTFS partition is in an
+        unsafe state. Please resume and shutdown Windows fully (no hibernation
+        or fast restarting.)
+        """)
+    h.inventory.setReadOnlyMounts(["/Volumes/BACKUP"])
+    let event = await h.service.diskAppeared(d)
+    guard case .mountedReadOnly(let v, let reason) = event else {
+        Issue.record("expected .mountedReadOnly, got \(String(describing: event))")
+        return
+    }
+    #expect(reason == .hibernated)
+    #expect(v.access == .readOnly)
+    #expect(v.health == .hibernated)
+    #expect(v.mountedBy == .macOS)
+    #expect(Array(h.runner.commands.suffix(2)) == [unmount4s1, cmd(diskutil, "mount", "/dev/disk4s1")])
+    #expect(h.service.shouldApproveMacOSMount(d))
+    // The health stays visible in the list.
+    guard case .volumes(let list) = await h.service.handle(.listVolumes, authorization: nil) else { Issue.record("expected volumes"); return }
+    #expect(list.first?.health == .hibernated)
+    #expect(list.first?.mountedBy != .driveway)
+}
+
+@Test func exitZeroReadOnlyUncleanFallsBackLikeExit15() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(ntfs3g, "/dev/disk4s1", exit: 0, stderr: "The file system wasn't safely closed on Windows.\n")
+    h.inventory.setReadOnlyMounts(["/Volumes/BACKUP"])
+    let event = await h.service.diskAppeared(d)
+    guard case .mountedReadOnly(let v, let reason) = event else {
+        Issue.record("expected .mountedReadOnly, got \(String(describing: event))")
+        return
+    }
+    #expect(reason == .dirty)
+    #expect(v.access == .readOnly)
+    #expect(v.health == .dirty)
+    #expect(Array(h.runner.commands.suffix(2)) == [unmount4s1, cmd(diskutil, "mount", "/dev/disk4s1")])
+    guard case .volumes(let list) = await h.service.handle(.listVolumes, authorization: nil) else { Issue.record("expected volumes"); return }
+    #expect(list.first?.health == .dirty)
+}
+
+@Test func explicitMountThatFallsBackIsNotReportedReadWrite() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    h.runner.script(ntfs3g, "/dev/disk4s1", exit: 0)
+    h.inventory.setReadOnlyMounts(["/Volumes/BACKUP"])
+    let v = mountedVolume(await h.service.handle(.mount("disk4s1"), authorization: nil))
+    #expect(v?.access == .readOnly)
+    #expect(v?.health == .dirty)
+    #expect(v?.mountedBy == .macOS)
 }

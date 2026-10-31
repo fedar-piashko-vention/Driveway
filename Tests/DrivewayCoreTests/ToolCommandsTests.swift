@@ -25,7 +25,7 @@ private let p = ToolPaths()
             readOnly: false, uid: 501, gid: 20, backend: .kernel, paths: p)
             == Command(
                 executable: "/opt/homebrew/bin/ntfs-3g",
-                arguments: ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20"]))
+                arguments: ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover"]))
 }
 
 @Test func ntfs3gFSKitPutsBackendFirst() {
@@ -33,7 +33,7 @@ private let p = ToolPaths()
         ToolCommands.ntfs3gMount(
             device: "/dev/disk4s1", mountPoint: "/Volumes/BACKUP", volumeName: "BACKUP",
             readOnly: false, uid: 501, gid: 20, backend: .fskit, paths: p).arguments
-            == ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20"])
+            == ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover"])
 }
 
 @Test func ntfs3gReadOnlyAppendsRo() {
@@ -43,15 +43,15 @@ private let p = ToolPaths()
     let fskit = ToolCommands.ntfs3gMount(
         device: "/dev/disk4s1", mountPoint: "/Volumes/BACKUP", volumeName: "BACKUP",
         readOnly: true, uid: 501, gid: 20, backend: .fskit, paths: p)
-    #expect(kernel.arguments.last == "volname=BACKUP,uid=501,gid=20,ro")
-    #expect(fskit.arguments.last == "backend=fskit,volname=BACKUP,uid=501,gid=20,ro")
+    #expect(kernel.arguments.last == "volname=BACKUP,uid=501,gid=20,norecover,ro")
+    #expect(fskit.arguments.last == "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover,ro")
 }
 
 @Test func ntfs3gEscapesVolumeName() {
     let cmd = ToolCommands.ntfs3gMount(
         device: "/dev/disk4s1", mountPoint: "/Volumes/a", volumeName: "a,b",
         readOnly: false, uid: 501, gid: 20, backend: .kernel, paths: p)
-    #expect(cmd.arguments.last == "volname=a\\,b,uid=501,gid=20")
+    #expect(cmd.arguments.last == "volname=a\\,b,uid=501,gid=20,norecover")
 }
 
 @Test func ext4fuseMountBackends() {

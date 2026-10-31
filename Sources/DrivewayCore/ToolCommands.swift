@@ -6,12 +6,16 @@ public enum CheckMode: String, Codable, Sendable {
 
 /// The only place external tool command lines are defined. The root helper runs these.
 public enum ToolCommands {
-    /// ntfs-3g mount. Options: `[backend=fskit,]volname=<label>,uid=<uid>,gid=<gid>[,ro]`.
+    /// ntfs-3g mount. Options: `[backend=fskit,]volname=<label>,uid=<uid>,gid=<gid>,norecover[,ro]`.
+    ///
+    /// `norecover` because ntfs-3g's default, `recover`, clears the Windows logfile of a drive that wasn't
+    /// unmounted properly and mounts it read/write: a silent fix. With `norecover` such a drive is refused,
+    /// and Driveway falls back to a read-only mount with Fix & mount on offer.
     public static func ntfs3gMount(
         device: String, mountPoint: String, volumeName: String, readOnly: Bool,
         uid: UInt32, gid: UInt32, backend: MountBackend, paths: ToolPaths
     ) -> Command {
-        var options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),uid=\(uid),gid=\(gid)"
+        var options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),uid=\(uid),gid=\(gid),norecover"
         if readOnly { options += ",ro" }
         return Command(
             executable: paths.ntfs3g,
