@@ -966,3 +966,79 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(again.first?.mountedBy == .driveway)
     #expect(again.first?.otherPartitionCount == 2)
 }
+
+// MARK: - Final review: drives are evaluated again after login and Setup (I5)
+
+@Test func driveLeftAtTheLoginWindowIsTakenOverAfterLogin() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let console = ConsoleBox(nil)
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], consoleProvider: { console.value })
+    #expect(await h.service.diskAppeared(d) == nil)  // nobody logged in: left to macOS
+    #expect(h.runner.commands.isEmpty)
+
+    // macOS mounted it read-only meanwhile; then someone logs in.
+    var mountedByMacOS = d
+    mountedByMacOS.volumePath = "/Volumes/BACKUP"
+    h.inventory.setDisks([mountedByMacOS])
+    console.value = ConsoleUser(uid: 501, gid: 20)
+    let events = await h.service.reevaluateDrives()
+    guard events.count == 1, case .mounted(let v) = events[0] else { Issue.record("expected one .mounted, got \(events)"); return }
+    #expect(v.access == .readWrite)
+    #expect(v.mountedBy == .driveway)
+    #expect(h.runner.commands == [unmount4s1, ntfs3gBackup])
+
+    // Evaluating again changes nothing: Driveway holds it now.
+    #expect(await h.service.reevaluateDrives().isEmpty)
+    #expect(h.runner.commands.count == 2)
+}
+
+@Test func driveAttachedBeforeSetupIsTakenOverOnceNTFSWritingIsReady() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let features = Box<[Feature: FeatureState]>([.readNTFS: .ready, .writeNTFS: .notAvailableYet])
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], featuresProvider: { features.value })
+    #expect(await h.service.diskAppeared(d) == nil)
+    features.value = allReady
+    let events = await h.service.reevaluateDrives()
+    guard events.count == 1, case .mounted = events[0] else { Issue.record("expected one .mounted, got \(events)"); return }
+    #expect(h.runner.commands == [ntfs3gBackup])
+}
+
+@Test func reevaluationLeavesOtherDrivesAlone() async {
+    let tuxera = disk("disk5s1", kind: "tuxera_ntfs", name: "TUX", path: "/Volumes/TUX")
+    let exfat = disk("disk6s1", kind: "exfat", name: "STICK", path: "/Volumes/STICK")
+    let ownMount = disk("disk7s1", kind: "macfuse", name: "OLD", path: "/Volumes/OLD")
+    let dirty = disk("disk8s1", name: "DIRTY")
+    let h = makeHarness(
+        disks: [tuxera, exfat, ownMount, dirty],
+        headers: ["disk5s1": ntfsHeader, "disk7s1": ntfsHeader, "disk8s1": ntfsHeader])
+    h.runner.script(ntfs3g, "/dev/disk8s1", exit: 15)
+    guard case .mountedReadOnly(_, .dirty) = await h.service.diskAppeared(dirty) else { Issue.record("expected dirty"); return }
+    let before = h.runner.commands.count
+    // Another driver's drive, a format Driveway doesn't manage, a FUSE mount, and a drive known to be dirty:
+    // trying again can't help until it's fixed.
+    #expect(await h.service.reevaluateDrives().isEmpty)
+    #expect(h.runner.commands.count == before)
+}
+
+@Test func backendStatusRequestRefreshesTheFeatures() async {
+    let seen = Box<[BackendAvailability]>([])
+    let h = makeHarness(disks: [], backendChecked: { seen.value.append($0) })
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    #expect(seen.value == [.ready(.kernel)])
+}
+
+@Test func reevaluationTriggerFiresOnLoginAndOnNewlyReadyFeatures() {
+    let user = ConsoleUser(uid: 501, gid: 20)
+    let notReady: [Feature: FeatureState] = [.readNTFS: .ready, .writeNTFS: .notAvailableYet, .extDrives: .notAvailableYet]
+    var t = ReevaluationTrigger(user: nil, features: notReady)
+    func update(_ user: ConsoleUser?, _ features: [Feature: FeatureState]) -> Bool { t.update(user: user, features: features) }
+    #expect(!update(nil, notReady))
+    #expect(update(user, notReady))  // someone logged in
+    #expect(!update(user, notReady))
+    #expect(update(user, allReady))  // Setup finished
+    #expect(!update(user, allReady))
+    #expect(!update(nil, allReady))  // logged out: nothing to take over
+    #expect(update(ConsoleUser(uid: 502, gid: 20), allReady))  // another user
+    #expect(!update(ConsoleUser(uid: 502, gid: 20), notReady))  // features lost: nothing to do
+    #expect(update(ConsoleUser(uid: 502, gid: 20), allReady))
+}

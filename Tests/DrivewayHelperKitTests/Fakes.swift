@@ -252,7 +252,9 @@ func makeHarness(
     disks: [DiskDescription], headers: [String: Data] = [:], auth: Bool = true, probe: FakeProbe = .kernel,
     settings: DrivewaySettings = DrivewaySettings(), console: ConsoleUser? = ConsoleUser(uid: 501, gid: 20),
     features: [Feature: FeatureState] = allReady, boot: Set<String> = ["disk0"], mounted: Bool = true,
-    consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false
+    consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false,
+    featuresProvider: (@Sendable () -> [Feature: FeatureState])? = nil,
+    backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in }
 ) -> Harness {
     let runner = FakeRunner()
     let unbounded = UnboundedRunner(base: runner)
@@ -261,7 +263,8 @@ func makeHarness(
     let logs = Box<[String]>([])
     let service = HelperService(
         runner: runner, unboundedRunner: unbounded, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
-        backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console }, features: { features },
+        backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console },
+        features: featuresProvider ?? { features }, backendChecked: backendChecked,
         log: { line in logs.value.append(line) })
     return Harness(service: service, runner: runner, unbounded: unbounded, inventory: inventory, settings: store, logs: logs)
 }

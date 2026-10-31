@@ -26,11 +26,35 @@ let features = Mutex<[Feature: FeatureState]>(
 
 // Mounts keep the default time limit. Check, repair, backup and format run for as long as they take: stopping
 // ntfsclone, e2fsck or ntfsfix half-way through a large drive would do more harm than waiting.
+/// Armed once the helper has adopted its old mounts and the disk watcher runs; until then nothing is evaluated
+/// again (a drive still mounted from before a restart must be adopted, not taken over).
+let trigger = Mutex<ReevaluationTrigger?>(nil)
+
+/// Stores fresh feature states, then runs the plug-in decision again if a drive may now be mountable.
+@Sendable func updateFeatures(backend: BackendAvailability) {
+    let states = featureStates(HelperEnvironment.currentToolInventory(paths: paths, backend: backend))
+    features.withLock { $0 = states }
+    reevaluateIfNeeded()
+}
+
+/// Someone logged in, or NTFS writing / ext drives became ready: drives attached before that were left to macOS.
+@Sendable func reevaluateIfNeeded() {
+    let user = HelperEnvironment.consoleUser()
+    let states = features.withLock { $0 }
+    guard trigger.withLock({ $0?.update(user: user, features: states) ?? false }) else { return }
+    Task {
+        logger.notice("Evaluating drives again: someone logged in or a feature became ready.")
+        for event in await service.reevaluateDrives() { listener.broadcast(event) }
+    }
+}
+
 let service = HelperService(
     runner: ProcessCommandRunner(), unboundedRunner: ProcessCommandRunner(timeout: nil), auth: SystemAuthorizationVerifier(), inventory: inventory,
     settings: SettingsStore(), paths: paths, backendProbe: backendProbe, osBuild: HelperEnvironment.osBuild(),
     consoleUser: { HelperEnvironment.consoleUser() },
     features: { features.withLock { $0 } },
+    // Setup asks for the backend after every step: refresh the features then, not 5 minutes later.
+    backendChecked: { updateFeatures(backend: $0) },
     log: { logger.notice("\($0, privacy: .public)") })
 
 let listener = HelperListener(service: service, logger: logger)
@@ -40,12 +64,10 @@ guard let watcher = DiskWatcher(broadcast: { listener.broadcast($0) }, logger: l
     exit(1)
 }
 
-/// The backend as the service sees it (including a recorded FSKit failure), then the tools on disk.
+/// The backend as the service sees it (including a recorded FSKit failure), then the tools on disk: handling
+/// `.backendStatus` calls `updateFeatures`.
 @Sendable func refreshFeatures() async {
-    var backend = BackendAvailability.unavailable
-    if case .backend(let b) = await service.handle(.backendStatus, authorization: nil) { backend = b }
-    let states = featureStates(HelperEnvironment.currentToolInventory(paths: paths, backend: backend))
-    features.withLock { $0 = states }
+    _ = await service.handle(.backendStatus, authorization: nil)
 }
 
 Task {
@@ -56,10 +78,20 @@ Task {
     await service.adoptExistingMounts()
     watcher.start(service: service)
     listener.start()
+    let states = features.withLock { $0 }
+    trigger.withLock { $0 = ReevaluationTrigger(user: HelperEnvironment.consoleUser(), features: states) }
     logger.notice("Driveway helper \(helperProtocolVersion, privacy: .public) started.")
     while true {
         try? await Task.sleep(for: .seconds(300))
         await refreshFeatures()
+    }
+}
+
+// Watches for a login: a drive attached at the login window was left to macOS and is taken over now.
+Task {
+    while true {
+        try? await Task.sleep(for: .seconds(5))
+        reevaluateIfNeeded()
     }
 }
 

@@ -49,6 +49,26 @@ public enum VolumeList {
         return nil
     }
 
+    /// The Info tab offers Mount read/write for an NTFS drive that macOS mounted (read-only) or that isn't mounted,
+    /// unless it is dirty or hibernated: those have their own banner, and mounting again can't help.
+    public static func offersMountReadWrite(_ v: Volume) -> Bool {
+        guard v.filesystem == .ntfs, v.health != .dirty, v.health != .hibernated else { return false }
+        return v.mountedBy == .macOS || v.mountedBy == .none
+    }
+
+    /// What to tell the user when Mount read/write didn't end with Driveway's read/write mount; nil when it did.
+    public static func mountReadWriteProblem(_ v: Volume) -> String? {
+        if v.mountedBy == .driveway, v.access == .readWrite { return nil }
+        let failed = "Driveway couldn't mount this drive read/write"
+        if let error = v.lastError { return "\(failed): \(error)" }
+        switch v.health {
+        case .dirty: return "\(failed) because Windows didn't shut it down cleanly. Use \(Copy.fixAndMount)."
+        case .hibernated:
+            return "\(failed) because Windows is hibernating. Shut Windows down fully, then plug the drive in again."
+        case .clean, .unknown: return "\(failed). Open Setup to check that NTFS writing is ready."
+        }
+    }
+
     /// The buttons the Check & Repair tab offers. Back up is NTFS only (the helper clones with ntfsclone); the forced
     /// repair answers yes to everything (`e2fsck -y`), so only ext has it.
     public static func repairActions(for fs: FilesystemKind) -> [RepairAction] {

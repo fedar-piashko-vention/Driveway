@@ -21,6 +21,9 @@ public actor HelperService {
     let osBuild: String
     let consoleUser: @Sendable () -> ConsoleUser?
     let features: @Sendable () -> [Feature: FeatureState]
+    /// Told the backend's availability whenever the app asks for it (Setup does, after each step), so the
+    /// feature states can be refreshed at once.
+    let backendChecked: @Sendable (BackendAvailability) -> Void
     let log: @Sendable (String) -> Void
 
     /// Volumes Driveway mounted, by BSD name.
@@ -59,6 +62,7 @@ public actor HelperService {
         settings: any SettingsStoring, paths: ToolPaths, backendProbe: any BackendProbing, osBuild: String,
         consoleUser: @escaping @Sendable () -> ConsoleUser?,
         features: @escaping @Sendable () -> [Feature: FeatureState],
+        backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in },
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.runner = runner
@@ -71,6 +75,7 @@ public actor HelperService {
         self.osBuild = osBuild
         self.consoleUser = consoleUser
         self.features = features
+        self.backendChecked = backendChecked
         self.log = log
         let loaded = settings.load()
         shared.withLock { $0.settings = loaded }
@@ -93,7 +98,10 @@ public actor HelperService {
         case .getSettings: return .settings(currentSettings)
         case .setSettings(let s): return setSettings(s, authorization: authorization)
         case .helperVersion: return .version(helperProtocolVersion)
-        case .backendStatus: return .backend(await backendAvailability())
+        case .backendStatus:
+            let availability = await backendAvailability()
+            backendChecked(availability)
+            return .backend(availability)
         case .format(let r): return await format(r, authorization: authorization)
         case .mount(let ref), .unmount(let ref), .eject(let ref), .fixAndMount(let ref), .check(let ref),
             .repair(let ref, _), .backup(let ref, _):
@@ -272,6 +280,28 @@ public actor HelperService {
             case .failed(let v, let message, _, _): return .mountFailed(v, message: message)
             }
         }
+    }
+
+    /// Runs the plug-in decision again for NTFS and ext partitions that Driveway doesn't hold: drives attached at
+    /// the login window or before Setup was finished stay with macOS until then. Leaves out drives another driver
+    /// or a FUSE mount owns, and drives known to be dirty or hibernated (they need fixing first). Each drive waits
+    /// its turn in its disk's queue, as at plug-in. Returns the events to broadcast.
+    public func reevaluateDrives() async -> [VolumeEvent] {
+        guard let ctx = await context() else { return [] }
+        var events: [VolumeEvent] = []
+        for d in ctx.disks where Self.isValidBSDName(d.bsdName) && !d.isWholeMedia {
+            guard mounts[d.bsdName] == nil, Self.owner(of: d) == nil, Self.ownBackend(forVolumeKind: d.volumeKind) == nil
+            else { continue }
+            if let health = notes[d.bsdName]?.health, health == .dirty || health == .hibernated { continue }
+            guard await filesystem(of: d)?.isDrivewayManaged == true else { continue }
+            let key = Self.lockKey(d.bsdName)
+            await lockDisk(key)
+            // Another operation may have mounted it while this waited.
+            let event = mounts[d.bsdName] == nil ? await appeared(d) : nil
+            await releaseDisk(key)
+            if let event { events.append(event) }
+        }
+        return events
     }
 
     /// Reports the removal at once. If an operation holds the disk, forgetting waits until it finishes, so

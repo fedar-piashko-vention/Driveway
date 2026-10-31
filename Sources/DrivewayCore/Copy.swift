@@ -15,6 +15,7 @@ public enum Copy {
     public static func featuresReady(_ n: Int) -> String { "\(n) of 4 features ready" }
 
     public static let fixAndMount = "Fix & mount read/write"
+    public static let mountReadWrite = "Mount read/write"
     public static let handledByMacOS = "handled by macOS"
     public static func mountedBy(_ driver: String) -> String { "Mounted by \(driver)" }
     public static let autoMountNTFS = "Auto-mount NTFS read/write"

@@ -52,6 +52,13 @@ struct InfoTab: View {
             }
             Section {
                 HStack {
+                    if VolumeList.offersMountReadWrite(volume) {
+                        Button(Copy.mountReadWrite) { Task { await model.mountReadWrite(volume) } }
+                            .disabled(model.busy.contains(volume.bsdName) || model.isAlwaysReadOnly(volume))
+                            .help(
+                                model.isAlwaysReadOnly(volume)
+                                    ? "This drive is set to always mount read-only." : "Mount this drive read/write with Driveway.")
+                    }
                     Button("Eject") { Task { await model.eject(volume) } }
                         .disabled(model.busy.contains(volume.bsdName))
                     Button("Show in Finder") {
