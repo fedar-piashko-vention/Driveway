@@ -258,11 +258,13 @@ public actor HelperService {
     }
 
     /// The caller holds the disk's queue.
+    /// A disk Driveway won't take over is always left to macOS, so a mount the approval callback refused earlier
+    /// is released and asked for again.
     private func appeared(_ disk: DiskDescription) async -> VolumeEvent? {
-        guard let ctx = await context() else { return nil }
+        guard let ctx = await context() else { return await leaveToMacOS(disk, nil) }
         // Gone already: its disappearance overtook this event.
         guard let d = ctx.disks.first(where: { $0.bsdName == disk.bsdName }) else { return nil }
-        guard !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return nil }
+        guard !Self.isEFI(d), !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return await leaveToMacOS(d, nil) }
         if let existing = mounts[d.bsdName] { return .mounted(existing) }
 
         guard let fs = await filesystem(of: d) else { return await leaveToMacOS(d, nil) }

@@ -1042,3 +1042,31 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(!update(ConsoleUser(uid: 502, gid: 20), notReady))  // features lost: nothing to do
     #expect(update(ConsoleUser(uid: 502, gid: 20), allReady))
 }
+
+// MARK: - Final review: a refused macOS mount is always released (I6)
+
+@Test func refusedMountIsReleasedWhenTheBootDiskCantBeRead() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)
+    #expect(!h.service.shouldApproveMacOSMount(d))  // refused: Driveway means to mount it
+
+    h.inventory.setBoot([])  // fail closed: Driveway won't touch it now
+    #expect(await h.service.diskAppeared(d) == nil)
+    #expect(h.runner.commands == [cmd(diskutil, "mount", "/dev/disk4s1")])
+    #expect(h.service.shouldApproveMacOSMount(d))
+}
+
+@Test func refusedMountIsReleasedWhenTheDiskTurnsOutProtected() async {
+    let d = disk("disk4s1", name: "BACKUP")
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader])
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)
+    #expect(!h.service.shouldApproveMacOSMount(d))
+
+    h.inventory.setBoot(["disk0", "disk4"])  // it is a boot disk after all
+    #expect(await h.service.diskAppeared(d) == nil)
+    #expect(h.runner.commands == [cmd(diskutil, "mount", "/dev/disk4s1")])
+    #expect(h.service.shouldApproveMacOSMount(d))
+}
