@@ -13,16 +13,18 @@ extension HelperService {
         case .partition(let name): (target, wholeDiskTarget) = (name, false)
         }
         guard Self.isValidBSDName(target) else { return .error(.unknownVolume) }
+        // Checked before waiting for the disk: the administrator's credential is only good for the right's timeout.
+        let authorized = auth.verify(authorization, right: AuthorizationRights.modifyDisk)
         let key = Self.lockKey(target)
         await lockDisk(key)
-        let response = await formatHeld(r, target: target, wholeDiskTarget: wholeDiskTarget, key: key, authorization: authorization)
+        let response = await formatHeld(r, target: target, wholeDiskTarget: wholeDiskTarget, key: key, authorized: authorized)
         await releaseDisk(key)
         return response
     }
 
     /// The caller holds the queue for `key`.
     private func formatHeld(
-        _ r: FormatRequest, target: String, wholeDiskTarget: Bool, key: String, authorization: Data?
+        _ r: FormatRequest, target: String, wholeDiskTarget: Bool, key: String, authorized: Bool
     ) async -> HelperResponse {
 
         guard let ctx = await context() else { return .error(.protectedDisk) }
@@ -43,7 +45,7 @@ extension HelperService {
             return .error(.validation(error))
         }
         if ctx.policy.isProtected(d, allDisks: ctx.disks) { return .error(.protectedDisk) }
-        guard auth.verify(authorization, right: AuthorizationRights.modifyDisk) else { return .error(.notAuthorized) }
+        guard authorized else { return .error(.notAuthorized) }
 
         // What was known about the erased volumes is about to be wrong. Until Driveway mounts the result,
         // macOS may mount new volumes on this disk (the temporary ExFAT volume, a new exFAT/FAT volume).

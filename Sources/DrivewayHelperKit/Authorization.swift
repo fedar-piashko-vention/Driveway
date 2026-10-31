@@ -3,8 +3,14 @@ import Foundation
 import Security
 
 /// The authorization database entry for `app.driveway.helper.modify-disk`: the rule of
-/// `kAuthorizationRuleAuthenticateAsAdmin` (an administrator's name and password), with `timeout` 0 and
-/// `shared` false so a credential is never reused for a later operation or shared with other processes.
+/// `kAuthorizationRuleAuthenticateAsAdmin` (an administrator's name and password), with `shared` false so the
+/// credential is never shared with other processes, and a 60-second `timeout`.
+///
+/// The app asks for the password (pre-authorizes) and hands the authorization to the helper, which checks the right
+/// again without a prompt. With `timeout` 0 the credential is spent by the app's own check, so the helper's check
+/// always failed ("The administrator authorization wasn't accepted", live session 2026-10-31). 60 seconds covers
+/// the trip to the helper, which checks before it waits for the disk. A credential still can't be reused for a later
+/// operation: the app makes a new authorization for each request and frees it after the reply.
 public enum ModifyDiskRight {
     public static let name = DrivewayIPC.AuthorizationRights.modifyDisk
 
@@ -16,7 +22,7 @@ public enum ModifyDiskRight {
             "allow-root": false,
             "session-owner": false,
             "shared": false,
-            "timeout": 0,
+            "timeout": 60,
             "tries": 10000,
             "version": 0,
             "comment": "Used by Driveway's helper to format, repair or back up a drive.",

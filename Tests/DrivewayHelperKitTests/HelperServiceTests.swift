@@ -1250,3 +1250,21 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(v.access == .readOnly)
     #expect(!h.runner.commands.contains(cmd(diskutil, "mount", "/dev/disk4s1")))
 }
+
+@Test func authorizationIsCheckedBeforeWaitingForABusyDisk() async {
+    // The administrator's credential lasts only the right's timeout; a request queued behind a long operation must
+    // not fail as "not authorized" because it was checked after the wait.
+    let d = disk("disk4s1", name: "BACKUP")
+    let auth = ExpiringAuth()
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], authVerifier: auth)
+    let gate = h.runner.hold(ntfs3g, "/dev/disk4s1")
+    let service = h.service
+    async let appeared = service.diskAppeared(d)
+    await gate.reached.wait()
+    async let fixed = service.handle(.fixAndMount(ref("disk4s1")), authorization: Data(count: 32))
+    for _ in 0..<200 { await Task.yield() }
+    auth.expire()  // the credential runs out while the request waits for the disk
+    gate.open()
+    let (_, response) = await (appeared, fixed)
+    #expect(response != .error(.notAuthorized))
+}

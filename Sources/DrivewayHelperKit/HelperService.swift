@@ -106,19 +106,22 @@ public actor HelperService {
         case .mount(let ref), .unmount(let ref), .eject(let ref), .fixAndMount(let ref), .check(let ref),
             .repair(let ref, _), .backup(let ref, _):
             guard Self.isValidBSDName(ref.bsdName) else { return .error(.unknownVolume) }
+            // Checked before waiting for the disk: the administrator's credential is only good for a short
+            // while (the right's timeout), and the wait can be as long as another drive operation.
+            let authorized = !request.requiresAuthorization || auth.verify(authorization, right: AuthorizationRights.modifyDisk)
             let key = Self.lockKey(ref.bsdName)
             await lockDisk(key)
-            let response = await diskRequest(request, ref, authorization: authorization)
+            let response = await diskRequest(request, ref, authorized: authorized)
             await releaseDisk(key)
             return response
         }
     }
 
     /// A request for one disk. The caller holds the disk's queue.
-    private func diskRequest(_ request: HelperRequest, _ ref: DiskRef, authorization: Data?) async -> HelperResponse {
+    private func diskRequest(_ request: HelperRequest, _ ref: DiskRef, authorized: Bool) async -> HelperResponse {
         let d: DiskDescription
         let ctx: Context
-        switch await resolve(ref, request: request, authorization: authorization) {
+        switch await resolve(ref, request: request, authorized: authorized) {
         case .failure(let e): return .error(e)
         case .success(let resolved): (d, ctx) = resolved
         }
@@ -157,7 +160,7 @@ public actor HelperService {
     /// Name check, then lookup, then identity (the drive must still be the one the app showed), then
     /// protection (the EFI system partition included), then authorization. The caller holds the disk's queue.
     private func resolve(
-        _ ref: DiskRef, request: HelperRequest, authorization: Data?
+        _ ref: DiskRef, request: HelperRequest, authorized: Bool
     ) async -> Result<(DiskDescription, Context), HelperError> {
         let bsd = ref.bsdName
         guard Self.isValidBSDName(bsd) else { return .failure(.unknownVolume) }
@@ -165,9 +168,7 @@ public actor HelperService {
         guard let d = ctx.disks.first(where: { $0.bsdName == bsd }) else { return .failure(.unknownVolume) }
         guard identityMatches(d, key: ref.key) else { return .failure(.unknownVolume) }
         if Self.isEFI(d) || ctx.policy.isProtected(d, allDisks: ctx.disks) { return .failure(.protectedDisk) }
-        if request.requiresAuthorization, !auth.verify(authorization, right: AuthorizationRights.modifyDisk) {
-            return .failure(.notAuthorized)
-        }
+        if !authorized { return .failure(.notAuthorized) }
         return .success((d, ctx))
     }
 
