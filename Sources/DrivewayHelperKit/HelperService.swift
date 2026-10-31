@@ -332,6 +332,8 @@ public actor HelperService {
     public nonisolated func shouldApproveMacOSMount(_ disk: DiskDescription) -> Bool {
         let bsd = disk.bsdName
         guard Self.isValidBSDName(bsd) else { return true }
+        // Driveway's probe named it ext. macOS has no ext driver, so its mount could only fail.
+        if disk.volumeKind == ExtProbe.volumeKind { return false }
         // One lock, no file access: this runs on DiskArbitration's callback queue.
         let s = shared.withLock { $0 }
         // Driveway's own claim wins over everything, including a format in progress on the disk.

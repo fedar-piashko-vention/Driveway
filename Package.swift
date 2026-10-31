@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "Driveway", targets: ["Driveway"]),
         .executable(name: "DrivewayAgent", targets: ["DrivewayAgent"]),
         .executable(name: "DrivewayHelper", targets: ["DrivewayHelper"]),
+        .executable(name: "DrivewayExtProbe", targets: ["DrivewayExtProbe"]),
     ],
     targets: [
         .target(name: "DrivewayCore"),
@@ -24,6 +25,8 @@ let package = Package(
         ),
         .executableTarget(name: "DrivewayHelper", dependencies: ["DrivewayHelperKit"]),
         .executableTarget(name: "DrivewayAgent", dependencies: ["DrivewayCore", "DrivewayIPC"]),
+        // driveway_ext.util, the probe in driveway_ext.fs that lets macOS recognise ext partitions.
+        .executableTarget(name: "DrivewayExtProbe", dependencies: ["DrivewayCore"]),
         .executableTarget(
             name: "Driveway",
             dependencies: ["DrivewayCore", "DrivewayIPC"],
