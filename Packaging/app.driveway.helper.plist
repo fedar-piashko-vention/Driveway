@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>app.driveway.helper</string>
+	<key>Program</key>
+	<string>/Library/PrivilegedHelperTools/app.driveway.helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>app.driveway.helper</key>
+		<true/>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/Driveway/helper.log</string>
+</dict>
+</plist>
