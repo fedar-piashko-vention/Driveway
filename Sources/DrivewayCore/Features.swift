@@ -72,7 +72,14 @@ public enum FeatureState: Equatable, Sendable {
     case notAvailableYet
 }
 
-private let minimumMacFUSE = SemanticVersion(major: 5, minor: 4, patch: 0)
+/// The running macOS's major version, e.g. 15 or 26.
+public let currentMacOSMajor = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+
+/// The oldest macFUSE Driveway mounts with. Earlier 5.x versions can write zero-filled data for small writes on
+/// FSKit. On macOS 26 and later, 5.5.0 also works around FSKit returning wrong data for short reads.
+public func minimumMacFUSE(macOSMajor: Int = currentMacOSMajor) -> SemanticVersion {
+    macOSMajor >= 26 ? SemanticVersion(major: 5, minor: 5, patch: 0) : SemanticVersion(major: 5, minor: 4, patch: 0)
+}
 
 private func helperRequirement(_ inv: ToolInventory) -> Requirement? {
     guard let version = inv.helperVersion else { return .helper }
@@ -80,8 +87,10 @@ private func helperRequirement(_ inv: ToolInventory) -> Requirement? {
 }
 
 public func featureStates(
-    _ inv: ToolInventory, ntfsWriteSupported: Bool = Capabilities.ntfsWriteSupported
+    _ inv: ToolInventory, ntfsWriteSupported: Bool = Capabilities.ntfsWriteSupported,
+    macOSMajor: Int = currentMacOSMajor
 ) -> [Feature: FeatureState] {
+    let minimumMacFUSE = minimumMacFUSE(macOSMajor: macOSMajor)
     let macFUSEReady = inv.macFUSEVersion.map { $0 >= minimumMacFUSE } ?? false
 
     func state(macFUSE: Bool, tools: [(missing: Bool, requirement: Requirement)]) -> FeatureState {

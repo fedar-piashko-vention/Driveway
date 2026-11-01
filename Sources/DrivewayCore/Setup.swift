@@ -53,7 +53,7 @@ public struct SetupGroup: Equatable, Sendable, Identifiable {
 
 /// What the Setup screen shows and the order its Unlock buttons install things in.
 public enum SetupScreen {
-    public static func groups(_ states: [Feature: FeatureState]) -> [SetupGroup] {
+    public static func groups(_ states: [Feature: FeatureState], macOSMajor: Int = currentMacOSMajor) -> [SetupGroup] {
         Feature.allCases.map { feature in
             let state = states[feature] ?? .locked(missing: [])
             var detail: String?
@@ -65,7 +65,7 @@ public enum SetupScreen {
                 detail = "\(Copy.notAvailableOnThisMac). \(Copy.noBackendReason)"
             case .locked(let missing):
                 items = missing.map {
-                    SetupItem(requirement: $0, label: Copy.requirementLabel($0), symbol: isWarning($0) ? "⚠️" : "❌")
+                    SetupItem(requirement: $0, label: Copy.requirementLabel($0, macOSMajor: macOSMajor), symbol: isWarning($0) ? "⚠️" : "❌")
                 }
             }
             return SetupGroup(feature: feature, title: title(feature), detail: detail, state: state, items: items)
@@ -126,11 +126,13 @@ extension Copy {
     public static let untrustedTapNote =
         "ntfs-3g and ext4fuse come from gromgit/fuse, a community tap that Homebrew marks as untrusted. If Homebrew asks whether to continue, Continue answers yes."
 
-    public static func requirementLabel(_ r: Requirement) -> String {
-        switch r {
+    public static func requirementLabel(_ r: Requirement, macOSMajor: Int = currentMacOSMajor) -> String {
+        let minimum = minimumMacFUSE(macOSMajor: macOSMajor)
+        let orLater = "\(minimum.major).\(minimum.minor) or later"
+        return switch r {
         case .homebrew: "Homebrew"
-        case .macFUSE: "macFUSE 5.4 or later"
-        case .macFUSEUpdate(let v): "macFUSE \(v.major).\(v.minor).\(v.patch) — needs update to 5.4 or later"
+        case .macFUSE: "macFUSE \(orLater)"
+        case .macFUSEUpdate(let v): "macFUSE \(v.major).\(v.minor).\(v.patch) — needs update to \(orLater)"
         case .macFUSEApproval(.kernel): "macFUSE — needs approval in System Settings → Privacy & Security"
         case .macFUSEApproval(.fskit): "macFUSE — needs approval in System Settings → General → Login Items & Extensions"
         case .ntfs3g: "ntfs-3g"

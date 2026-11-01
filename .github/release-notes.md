@@ -1,6 +1,6 @@
 Free, open-source NTFS read/write for Apple Silicon Macs, built on macFUSE and ntfs-3g.
 
-**Requires macFUSE 5.4.0 or later**, macOS 15.4 or later, Apple Silicon and Homebrew.
+**Requires macFUSE 5.4.0 or later (5.5.0 or later on macOS 26 and later)**, macOS 15.4 or later, Apple Silicon and Homebrew.
 
 ## Install
 

@@ -67,7 +67,7 @@ What Driveway can do depends on your version of macOS and on your Mac's security
 **macOS 26 and later.** macFUSE has fixed many FSKit problems on macOS 26 and 27, and Driveway uses FSKit automatically when it can. Nobody has tested Driveway on macOS 26 or later yet. If you have one of those versions:
 
 - Try it first with a drive that has nothing important on it. Copy some files to it, eject it, and check that the files open on Windows.
-- Use macFUSE 5.5.0 or later. That version works around a problem in FSKit on macOS 26 and 27 that could return wrong data when reading files.
+- Driveway needs macFUSE 5.5.0 or later on these versions, and Setup offers the update if you have an older one. 5.5.0 works around a problem in FSKit on macOS 26 and 27 that could return wrong data when reading files.
 - Please [tell us how it went](https://github.com/fedar-piashko-vention/Driveway/issues/new), whether it worked or not. That's how this table gets updated.
 
 **Driveway never asks you to lower your Mac's security**, and it never changes security settings itself. Some guides explain how to allow kernel extensions in Recovery. That makes your Mac less protected, and it's your decision alone. This guide doesn't cover it.
