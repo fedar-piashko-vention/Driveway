@@ -34,7 +34,7 @@ public enum CommandRunnerError: Error, Equatable, Sendable, CustomStringConverti
 }
 
 /// Runs a command with `Process`: argv only (never a shell), a fixed environment, stdin from /dev/null,
-/// stdout and stderr drained concurrently, and a timeout after which the tool is stopped.
+/// stdout and stderr drained concurrently, and an optional timeout after which the tool is stopped.
 public struct ProcessCommandRunner: CommandRunning {
     /// mkntfs converts labels through the locale, so it must be UTF-8. PATH is fixed so tools that
     /// spawn helpers can't pick up anything from the caller's environment.
@@ -44,12 +44,13 @@ public struct ProcessCommandRunner: CommandRunning {
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     ]
 
-    public var timeout: Duration
+    /// Nil runs the tool for as long as it takes: check, repair, backup and format of a large drive can take hours.
+    public var timeout: Duration?
     /// How long to keep reading output after the tool exits. A tool that daemonises (ntfs-3g) may leave a
     /// child holding the pipe open; this keeps that from hanging the helper.
     var drainGrace: Duration = .seconds(5)
 
-    public init(timeout: Duration = .seconds(30 * 60)) {
+    public init(timeout: Duration? = .seconds(30 * 60)) {
         self.timeout = timeout
     }
 
@@ -84,7 +85,7 @@ public struct ProcessCommandRunner: CommandRunning {
         let timedOut = Mutex(false)
         let timeout = self.timeout
         let watchdog = Task {
-            guard (try? await Task.sleep(for: timeout)) != nil, !exited.isFired else { return }
+            guard let timeout, (try? await Task.sleep(for: timeout)) != nil, !exited.isFired else { return }
             timedOut.withLock { $0 = true }
             kill(pid, SIGTERM)
             guard (try? await Task.sleep(for: .seconds(10))) != nil, !exited.isFired else { return }

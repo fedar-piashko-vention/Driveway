@@ -47,3 +47,9 @@ struct EventApplyTests {
         #expect(VolumeEvent.mountFailed(failed, message: "boom").applied(to: [a]) == [a, failed])
     }
 }
+
+@Test func removalClearsTheSelectionOfThatDriveOnly() {
+    #expect(VolumeEvent.removed(bsdName: "disk4s1").selection(after: "disk4s1") == nil)
+    #expect(VolumeEvent.removed(bsdName: "disk4s1").selection(after: "disk5s1") == "disk5s1")
+    #expect(VolumeEvent.removed(bsdName: "disk4s1").selection(after: nil) == nil)
+}

@@ -60,6 +60,19 @@ final class FakeRunner: CommandRunning {
     }
 }
 
+/// The runner the service uses for commands without a time limit. Passes every command on to `base`, so
+/// `base.commands` keeps the order of everything that ran, and records which ones came this way.
+final class UnboundedRunner: CommandRunning {
+    let base: FakeRunner
+    private let state = Mutex<[Command]>([])
+    init(base: FakeRunner) { self.base = base }
+    var commands: [Command] { state.withLock { $0 } }
+    func run(_ c: Command) async throws -> CommandResult {
+        state.withLock { $0.append(c) }
+        return try await base.run(c)
+    }
+}
+
 struct FakeAuth: AuthorizationVerifying {
     var valid: Bool
     init(valid: Bool) { self.valid = valid }
@@ -77,6 +90,8 @@ final class FakeInventory: DiskInventoryProviding {
         var headerReads: [String] = []
         var mountChecks: [String] = []
         var readOnlyMounts: Set<String> = []
+        /// Devices and mount points that stay in the mount table whatever is unmounted.
+        var stuck: Set<String> = []
     }
     private let state: Mutex<State>
 
@@ -85,7 +100,10 @@ final class FakeInventory: DiskInventoryProviding {
     }
 
     func setDisks(_ disks: [DiskDescription]) { state.withLock { $0.disks = disks } }
+    func setBoot(_ boot: Set<String>) { state.withLock { $0.boot = boot } }
+    func setMounted(_ mounted: Bool) { state.withLock { $0.mounted = mounted } }
     func setReadOnlyMounts(_ paths: Set<String>) { state.withLock { $0.readOnlyMounts = paths } }
+    func setStuck(_ entries: Set<String>) { state.withLock { $0.stuck = entries } }
     var headerReads: [String] { state.withLock { $0.headerReads } }
     var mountChecks: [String] { state.withLock { $0.mountChecks } }
 
@@ -111,6 +129,10 @@ final class FakeInventory: DiskInventoryProviding {
 
     func mountIsReadOnly(_ mountPoint: String) -> Bool? {
         state.withLock { $0.readOnlyMounts.contains(mountPoint) }
+    }
+
+    func isStillMounted(device: String, mountPoints: [String]) async -> Bool {
+        state.withLock { s in s.stuck.contains(device) || mountPoints.contains(where: s.stuck.contains) }
     }
 }
 
@@ -228,6 +250,8 @@ let ext4Header: Data = {
 struct Harness {
     let service: HelperService
     let runner: FakeRunner
+    /// The commands that ran without a time limit (also in `runner.commands`).
+    let unbounded: UnboundedRunner
     let inventory: FakeInventory
     let settings: MemorySettings
     let logs: Box<[String]>
@@ -237,17 +261,21 @@ func makeHarness(
     disks: [DiskDescription], headers: [String: Data] = [:], auth: Bool = true, probe: FakeProbe = .kernel,
     settings: DrivewaySettings = DrivewaySettings(), console: ConsoleUser? = ConsoleUser(uid: 501, gid: 20),
     features: [Feature: FeatureState] = allReady, boot: Set<String> = ["disk0"], mounted: Bool = true,
-    consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false
+    consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false,
+    featuresProvider: (@Sendable () -> [Feature: FeatureState])? = nil,
+    backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in }
 ) -> Harness {
     let runner = FakeRunner()
+    let unbounded = UnboundedRunner(base: runner)
     let inventory = FakeInventory(disks: disks, headers: headers, boot: boot, mounted: mounted)
     let store = MemorySettings(settings, failSaves: failSaves)
     let logs = Box<[String]>([])
     let service = HelperService(
-        runner: runner, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
-        backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console }, features: { features },
+        runner: runner, unboundedRunner: unbounded, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
+        backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console },
+        features: featuresProvider ?? { features }, backendChecked: backendChecked,
         log: { line in logs.value.append(line) })
-    return Harness(service: service, runner: runner, inventory: inventory, settings: store, logs: logs)
+    return Harness(service: service, runner: runner, unbounded: unbounded, inventory: inventory, settings: store, logs: logs)
 }
 
 func cmd(_ executable: String, _ args: String...) -> Command { Command(executable: executable, arguments: args) }
@@ -260,3 +288,6 @@ final class ConsoleBox: Sendable {
         set { state.withLock { $0 = newValue } }
     }
 }
+
+/// A request's drive reference with the key `disk(_:)` gives the volume.
+func ref(_ bsd: String) -> DiskRef { DiskRef(bsdName: bsd, key: "UUID-\(bsd)") }

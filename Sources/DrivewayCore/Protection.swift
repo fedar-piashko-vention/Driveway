@@ -11,6 +11,7 @@ public struct ProtectionPolicy: Sendable {
     /// report partition-type GUIDs.
     static let protectedContentTypes: Set<String> = [
         "apple_apfs", "apple_apfs_isc", "apple_apfs_recovery", "apple_hfs", "apple_boot",
+        "apple_corestorage", "apple_raid", "apple_raid_offline",
         "7c3457ef-0000-11aa-aa11-00306543ecac",  // APFS
         "ef57347c-0000-11aa-aa11-00306543ecac",  // APFS synthesized container
         "41504653-0000-11aa-aa11-00306543ecac",  // APFS volume
@@ -18,6 +19,9 @@ public struct ProtectionPolicy: Sendable {
         "52637672-7900-11aa-aa11-00306543ecac",  // Recovery
         "48465300-0000-11aa-aa11-00306543ecac",  // HFS+
         "426f6f74-0000-11aa-aa11-00306543ecac",  // Apple Boot
+        "53746f72-6167-11aa-aa11-00306543ecac",  // CoreStorage (Fusion Drive, legacy FileVault)
+        "52414944-0000-11aa-aa11-00306543ecac",  // Apple RAID
+        "52414944-5f4f-11aa-aa11-00306543ecac",  // Apple RAID, offline
     ]
     static let protectedVolumeKinds: Set<String> = ["apfs", "hfs"]
 

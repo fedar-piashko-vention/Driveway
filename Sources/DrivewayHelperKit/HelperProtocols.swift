@@ -15,6 +15,9 @@ public protocol DiskInventoryProviding: Sendable {
     func isMounted(at mountPoint: String) async -> Bool
     /// Whether the volume mounted at `mountPoint` is read-only; nil when nothing is mounted there.
     func mountIsReadOnly(_ mountPoint: String) -> Bool?
+    /// True when the mount table still has an entry from `device` or on one of `mountPoints`, after giving an
+    /// unmount that just finished a moment to show.
+    func isStillMounted(device: String, mountPoints: [String]) async -> Bool
 }
 
 extension DiskInventoryProviding {

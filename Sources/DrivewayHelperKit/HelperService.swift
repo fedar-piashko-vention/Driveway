@@ -9,7 +9,10 @@ import Synchronization
 /// Work on one whole disk is serialised: every request and disk event that touches a disk waits its
 /// turn in a first-in, first-out queue for that whole disk instead of being refused or dropped.
 public actor HelperService {
+    /// Runs commands with a time limit: mounts, unmounts and diskutil queries.
     let runner: any CommandRunning
+    /// Runs commands that may take hours and must never be stopped half-way: check, repair, backup, format.
+    let unboundedRunner: any CommandRunning
     let auth: any AuthorizationVerifying
     let inventory: any DiskInventoryProviding
     let store: any SettingsStoring
@@ -18,6 +21,9 @@ public actor HelperService {
     let osBuild: String
     let consoleUser: @Sendable () -> ConsoleUser?
     let features: @Sendable () -> [Feature: FeatureState]
+    /// Told the backend's availability whenever the app asks for it (Setup does, after each step), so the
+    /// feature states can be refreshed at once.
+    let backendChecked: @Sendable (BackendAvailability) -> Void
     let log: @Sendable (String) -> Void
 
     /// Volumes Driveway mounted, by BSD name.
@@ -52,13 +58,15 @@ public actor HelperService {
     let shared = Mutex(Shared())
 
     public init(
-        runner: any CommandRunning, auth: any AuthorizationVerifying, inventory: any DiskInventoryProviding,
+        runner: any CommandRunning, unboundedRunner: (any CommandRunning)? = nil, auth: any AuthorizationVerifying, inventory: any DiskInventoryProviding,
         settings: any SettingsStoring, paths: ToolPaths, backendProbe: any BackendProbing, osBuild: String,
         consoleUser: @escaping @Sendable () -> ConsoleUser?,
         features: @escaping @Sendable () -> [Feature: FeatureState],
+        backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in },
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.runner = runner
+        self.unboundedRunner = unboundedRunner ?? runner
         self.auth = auth
         self.inventory = inventory
         self.store = settings
@@ -67,6 +75,7 @@ public actor HelperService {
         self.osBuild = osBuild
         self.consoleUser = consoleUser
         self.features = features
+        self.backendChecked = backendChecked
         self.log = log
         let loaded = settings.load()
         shared.withLock { $0.settings = loaded }
@@ -89,24 +98,27 @@ public actor HelperService {
         case .getSettings: return .settings(currentSettings)
         case .setSettings(let s): return setSettings(s, authorization: authorization)
         case .helperVersion: return .version(helperProtocolVersion)
-        case .backendStatus: return .backend(await backendAvailability())
+        case .backendStatus:
+            let availability = await backendAvailability()
+            backendChecked(availability)
+            return .backend(availability)
         case .format(let r): return await format(r, authorization: authorization)
-        case .mount(let bsd), .unmount(let bsd), .eject(let bsd), .fixAndMount(let bsd), .check(let bsd),
-            .repair(let bsd, _), .backup(let bsd, _):
-            guard Self.isValidBSDName(bsd) else { return .error(.unknownVolume) }
-            let key = Self.lockKey(bsd)
+        case .mount(let ref), .unmount(let ref), .eject(let ref), .fixAndMount(let ref), .check(let ref),
+            .repair(let ref, _), .backup(let ref, _):
+            guard Self.isValidBSDName(ref.bsdName) else { return .error(.unknownVolume) }
+            let key = Self.lockKey(ref.bsdName)
             await lockDisk(key)
-            let response = await diskRequest(request, bsd, authorization: authorization)
+            let response = await diskRequest(request, ref, authorization: authorization)
             await releaseDisk(key)
             return response
         }
     }
 
     /// A request for one disk. The caller holds the disk's queue.
-    private func diskRequest(_ request: HelperRequest, _ bsd: String, authorization: Data?) async -> HelperResponse {
+    private func diskRequest(_ request: HelperRequest, _ ref: DiskRef, authorization: Data?) async -> HelperResponse {
         let d: DiskDescription
         let ctx: Context
-        switch await resolve(bsd, request: request, authorization: authorization) {
+        switch await resolve(ref, request: request, authorization: authorization) {
         case .failure(let e): return .error(e)
         case .success(let resolved): (d, ctx) = resolved
         }
@@ -142,18 +154,27 @@ public actor HelperService {
         return Context(disks: disks, policy: policy, settings: settings)
     }
 
-    /// Name check, then lookup, then protection, then authorization. The caller holds the disk's queue.
+    /// Name check, then lookup, then identity (the drive must still be the one the app showed), then
+    /// protection (the EFI system partition included), then authorization. The caller holds the disk's queue.
     private func resolve(
-        _ bsd: String, request: HelperRequest, authorization: Data?
+        _ ref: DiskRef, request: HelperRequest, authorization: Data?
     ) async -> Result<(DiskDescription, Context), HelperError> {
+        let bsd = ref.bsdName
         guard Self.isValidBSDName(bsd) else { return .failure(.unknownVolume) }
         guard let ctx = await context() else { return .failure(.protectedDisk) }
         guard let d = ctx.disks.first(where: { $0.bsdName == bsd }) else { return .failure(.unknownVolume) }
-        if ctx.policy.isProtected(d, allDisks: ctx.disks) { return .failure(.protectedDisk) }
+        guard identityMatches(d, key: ref.key) else { return .failure(.unknownVolume) }
+        if Self.isEFI(d) || ctx.policy.isProtected(d, allDisks: ctx.disks) { return .failure(.protectedDisk) }
         if request.requiresAuthorization, !auth.verify(authorization, right: AuthorizationRights.modifyDisk) {
             return .failure(.notAuthorized)
         }
         return .success((d, ctx))
+    }
+
+    /// True when `key` is the `settingsKey` Driveway shows for `d`: the one recorded when Driveway mounted it,
+    /// or the one its description gives now.
+    func identityMatches(_ d: DiskDescription, key: String) -> Bool {
+        key == d.settingsKey || key == mounts[d.bsdName]?.settingsKey
     }
 
     /// Waits until no other operation holds `key`, first come first served, then holds it.
@@ -216,6 +237,7 @@ public actor HelperService {
             guard !ctx.policy.isProtected(d, allDisks: ctx.disks) else { continue }
             if var v = mounts[d.bsdName] {
                 v.usedBytes = v.mountPoint.flatMap { inventory.usage(ofMountPoint: $0) }
+                (v.diskSizeBytes, v.otherPartitionCount) = Self.diskLayout(of: d, in: ctx.disks)
                 volumes.append(v)
             } else if let fs = await filesystem(of: d) {
                 volumes.append(describe(d, fs))
@@ -236,11 +258,13 @@ public actor HelperService {
     }
 
     /// The caller holds the disk's queue.
+    /// A disk Driveway won't take over is always left to macOS, so a mount the approval callback refused earlier
+    /// is released and asked for again.
     private func appeared(_ disk: DiskDescription) async -> VolumeEvent? {
-        guard let ctx = await context() else { return nil }
+        guard let ctx = await context() else { return await leaveToMacOS(disk, nil) }
         // Gone already: its disappearance overtook this event.
         guard let d = ctx.disks.first(where: { $0.bsdName == disk.bsdName }) else { return nil }
-        guard !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return nil }
+        guard !Self.isEFI(d), !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return await leaveToMacOS(d, nil) }
         if let existing = mounts[d.bsdName] { return .mounted(existing) }
 
         guard let fs = await filesystem(of: d) else { return await leaveToMacOS(d, nil) }
@@ -258,6 +282,28 @@ public actor HelperService {
             case .failed(let v, let message, _, _): return .mountFailed(v, message: message)
             }
         }
+    }
+
+    /// Runs the plug-in decision again for NTFS and ext partitions that Driveway doesn't hold: drives attached at
+    /// the login window or before Setup was finished stay with macOS until then. Leaves out drives another driver
+    /// or a FUSE mount owns, and drives known to be dirty or hibernated (they need fixing first). Each drive waits
+    /// its turn in its disk's queue, as at plug-in. Returns the events to broadcast.
+    public func reevaluateDrives() async -> [VolumeEvent] {
+        guard let ctx = await context() else { return [] }
+        var events: [VolumeEvent] = []
+        for d in ctx.disks where Self.isValidBSDName(d.bsdName) && !d.isWholeMedia {
+            guard mounts[d.bsdName] == nil, Self.owner(of: d) == nil, Self.ownBackend(forVolumeKind: d.volumeKind) == nil
+            else { continue }
+            if let health = notes[d.bsdName]?.health, health == .dirty || health == .hibernated { continue }
+            guard await filesystem(of: d)?.isDrivewayManaged == true else { continue }
+            let key = Self.lockKey(d.bsdName)
+            await lockDisk(key)
+            // Another operation may have mounted it while this waited.
+            let event = mounts[d.bsdName] == nil ? await appeared(d) : nil
+            await releaseDisk(key)
+            if let event { events.append(event) }
+        }
+        return events
     }
 
     /// Reports the removal at once. If an operation holds the disk, forgetting waits until it finishes, so
@@ -325,16 +371,31 @@ public actor HelperService {
         let access: AccessMode =
             d.volumePath == nil ? .notMounted : (owner == .macOS && fs.isDrivewayManaged ? .readOnly : .readWrite)
         let note = notes[d.bsdName]
+        let layout = Self.diskLayout(of: d, in: shared.withLock { $0.disks })
         return Volume(
             bsdName: d.bsdName, wholeDisk: d.wholeDisk, label: Self.displayLabel(d), filesystem: fs,
             capacityBytes: d.sizeBytes, usedBytes: d.volumePath.flatMap { inventory.usage(ofMountPoint: $0) },
             mountPoint: d.volumePath, access: access, health: note?.health ?? .unknown, mountedBy: owner,
-            deviceModel: d.deviceModel, settingsKey: d.settingsKey, lastError: note?.lastError)
+            deviceModel: d.deviceModel, settingsKey: d.settingsKey, lastError: note?.lastError,
+            diskSizeBytes: layout.diskSizeBytes, otherPartitionCount: layout.otherPartitions)
     }
 
-    func run(_ c: Command) async -> Result<CommandResult, HelperError> {
+    /// The size of `d`'s whole disk, and how many other partitions it has besides `d` and the EFI system
+    /// partition, whatever their filesystem: a whole-disk erase destroys them all.
+    static func diskLayout(
+        of d: DiskDescription, in disks: [DiskDescription]
+    ) -> (diskSizeBytes: Int64?, otherPartitions: Int) {
+        let size = disks.first { $0.bsdName == d.wholeDisk }?.sizeBytes
+        let others = disks.filter {
+            $0.wholeDisk == d.wholeDisk && $0.bsdName != d.wholeDisk && $0.bsdName != d.bsdName && !isEFI($0)
+        }
+        return (size, Set(others.map(\.bsdName)).count)
+    }
+
+    /// `unbounded` runs `c` without a time limit (check, repair, backup and format tools).
+    func run(_ c: Command, unbounded: Bool = false) async -> Result<CommandResult, HelperError> {
         do {
-            return .success(try await runner.run(c))
+            return .success(try await (unbounded ? unboundedRunner : runner).run(c))
         } catch CommandRunnerError.toolMissing(let path) {
             return .failure(.toolMissing(path))
         } catch {
@@ -343,8 +404,8 @@ public actor HelperService {
     }
 
     /// Like `run`, but a non-zero exit is a failure carrying the tool's message.
-    func runOK(_ c: Command) async -> Result<CommandResult, HelperError> {
-        switch await run(c) {
+    func runOK(_ c: Command, unbounded: Bool = false) async -> Result<CommandResult, HelperError> {
+        switch await run(c, unbounded: unbounded) {
         case .success(let r) where r.exitCode == 0: .success(r)
         case .success(let r): .failure(.commandFailed(Self.message(r, c)))
         case .failure(let e): .failure(e)
@@ -400,6 +461,13 @@ public actor HelperService {
     static func isSafeImagePath(_ path: String) -> Bool {
         guard path.hasPrefix("/"), !path.hasSuffix("/"), !path.contains("\0"), !path.hasPrefix("/dev/") else { return false }
         return !path.split(separator: "/").contains("..")
+    }
+
+    /// Nothing at `path` yet, or a regular file to replace; never a symlink, directory or device.
+    static func isReplaceableImagePath(_ path: String) -> Bool {
+        var st = stat()
+        guard lstat(path, &st) == 0 else { return errno == ENOENT }
+        return st.st_mode & S_IFMT == S_IFREG
     }
 
     static func message(_ r: CommandResult, _ c: Command) -> String {

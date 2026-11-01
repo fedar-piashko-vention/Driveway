@@ -9,7 +9,7 @@ func req(
     _ fs: FilesystemKind, _ label: String, _ target: FormatTarget = .wholeDisk("disk4"),
     scheme: PartitionScheme = .gpt, confirm: String = "BACKUP"
 ) -> FormatRequest {
-    FormatRequest(filesystem: fs, label: label, scheme: scheme, target: target, confirmation: confirm)
+    FormatRequest(filesystem: fs, label: label, scheme: scheme, target: target, confirmation: confirm, expectedKey: "K")
 }
 
 private func disk(

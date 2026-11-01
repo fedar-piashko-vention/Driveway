@@ -30,4 +30,5 @@ public struct ToolPaths: Sendable {
     public var mkfsExt4: String { "\(brewPrefix)/opt/e2fsprogs/sbin/mkfs.ext4" }
     public var diskutil: String { "/usr/sbin/diskutil" }
     public var umount: String { "/sbin/umount" }
+    public var chown: String { "/usr/sbin/chown" }
 }

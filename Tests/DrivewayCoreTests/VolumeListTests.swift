@@ -13,6 +13,32 @@ private func volume(
 }
 
 struct VolumeListTests {
+    @Test func mountReadWriteIsOfferedForNTFSThatDrivewayDoesNotHold() {
+        #expect(VolumeList.offersMountReadWrite(volume("disk4s1", .ntfs, access: .readOnly, health: .unknown, mountedBy: .macOS)))
+        #expect(VolumeList.offersMountReadWrite(volume("disk4s1", .ntfs, access: .notMounted, health: .unknown, mountedBy: .none)))
+        #expect(VolumeList.offersMountReadWrite(
+            volume("disk4s1", .ntfs, access: .readOnly, health: .unknown, mountedBy: .macOS, lastError: "fuse: device busy")))
+        // Already Driveway's, another driver's, not NTFS, or a drive that needs Fix & mount or Windows first.
+        #expect(!VolumeList.offersMountReadWrite(volume("disk4s1", .ntfs)))
+        #expect(!VolumeList.offersMountReadWrite(volume("disk4s1", .ntfs, mountedBy: .otherDriver("Tuxera NTFS"))))
+        #expect(!VolumeList.offersMountReadWrite(volume("disk5s1", .exfat, mountedBy: .macOS)))
+        #expect(!VolumeList.offersMountReadWrite(volume("disk4s1", .ntfs, access: .readOnly, health: .dirty, mountedBy: .macOS)))
+        #expect(!VolumeList.offersMountReadWrite(volume("disk4s1", .ntfs, access: .readOnly, health: .hibernated, mountedBy: .macOS)))
+    }
+
+    @Test func mountReadWriteResultIsNeverSilent() {
+        #expect(VolumeList.mountReadWriteProblem(volume("disk4s1", .ntfs)) == nil)
+        #expect(VolumeList.mountReadWriteProblem(
+            volume("disk4s1", .ntfs, access: .readOnly, health: .unknown, mountedBy: .macOS, lastError: "busy"))
+            == "Driveway couldn't mount this drive read/write: busy")
+        #expect(VolumeList.mountReadWriteProblem(volume("disk4s1", .ntfs, access: .readOnly, health: .dirty, mountedBy: .macOS))
+            == "Driveway couldn't mount this drive read/write because Windows didn't shut it down cleanly. Use Fix & mount read/write.")
+        #expect(VolumeList.mountReadWriteProblem(volume("disk4s1", .ntfs, access: .readOnly, health: .hibernated, mountedBy: .macOS))
+            == "Driveway couldn't mount this drive read/write because Windows is hibernating. Shut Windows down fully, then plug the drive in again.")
+        #expect(VolumeList.mountReadWriteProblem(volume("disk4s1", .ntfs, access: .readOnly, health: .unknown, mountedBy: .macOS))
+            == "Driveway couldn't mount this drive read/write. Open Setup to check that NTFS writing is ready.")
+    }
+
     @Test func sectionsSplitManagedFromOther() {
         let ntfs = volume("disk4s1", .ntfs)
         let exfat = volume("disk5s1", .exfat)

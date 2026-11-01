@@ -19,7 +19,7 @@ public enum NTFSMountOutcome: Equatable, Sendable {
         default: break
         }
         let lowered = stderr.lowercased()
-        if ["windows cache", "hibernat", "fast restart"].contains(where: lowered.contains) {
+        if hibernationPhrases.contains(where: lowered.contains) {
             return .hibernated
         }
         if ["scheduled for check", "unclean"].contains(where: lowered.contains) {
@@ -27,6 +27,29 @@ public enum NTFSMountOutcome: Equatable, Sendable {
         }
         let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         return .failed(message.isEmpty ? "ntfs-3g exited with code \(exitCode)" : message)
+    }
+
+    /// ntfs-3g's own reasons for a hibernated volume. Only these count: its generic read-only fallback
+    /// sentence ("...shutdown Windows fully (no hibernation or fast restarting.)") is printed for every
+    /// fallback, unclean volumes included, so the words "hibernation" or "fast restart" prove nothing.
+    static let hibernationPhrases = [
+        "windows is hibernated", "hibernated non-system partition", "metadata kept in windows cache",
+    ]
+
+    /// ntfs-3g can exit 0 yet mount read-only instead of read/write: it does that for a hibernated volume
+    /// and, with `norecover`, for an unclean one. `.mounted` only when the mount table doesn't say read-only
+    /// and the output says nothing about a fallback; otherwise `.hibernated` when the output carries one of
+    /// `hibernationPhrases`, else `.dirty`. Phrases match case-insensitively; `output` is stderr and stdout
+    /// together.
+    public static func afterSuccessfulMount(mountIsReadOnly: Bool?, output: String) -> NTFSMountOutcome {
+        let lowered = output.lowercased()
+        let fallbackPhrases = [
+            "read-only", "unsafe state", "hibernat", "windows cache", "fast restart", "unclean",
+            "not unmounted properly", "safely closed",
+        ]
+        guard mountIsReadOnly == true || fallbackPhrases.contains(where: lowered.contains) else { return .mounted }
+        if hibernationPhrases.contains(where: lowered.contains) { return .hibernated }
+        return .dirty
     }
 }
 

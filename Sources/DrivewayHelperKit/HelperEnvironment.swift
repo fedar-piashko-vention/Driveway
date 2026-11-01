@@ -41,8 +41,9 @@ public enum HelperEnvironment {
         return SemanticVersion(version.trimmingCharacters(in: .whitespaces))
     }
 
-    /// The helper's view of the installed tools. It is current with itself, so helper and app versions are
-    /// both `helperProtocolVersion`.
+    /// The helper's view of the installed tools, with the same rules as the app's scan (`ToolInventoryScanner`):
+    /// NTFS needs ntfs-3g and ntfsfix, e2fsprogs needs e2fsck and mkfs.ext4. It is current with itself, so
+    /// helper and app versions are both `helperProtocolVersion`.
     public static func toolInventory(
         paths: ToolPaths, backend: BackendAvailability, fileExists: (String) -> Bool, macFUSEInfoPlist: Data?,
         filesystemBundles: [String]
@@ -51,9 +52,9 @@ public enum HelperEnvironment {
             hasHomebrew: fileExists(paths.brew),
             macFUSEVersion: macFUSEVersion(infoPlist: macFUSEInfoPlist),
             backend: backend,
-            hasNTFS3G: fileExists(paths.ntfs3g),
+            hasNTFS3G: fileExists(paths.ntfs3g) && fileExists(paths.ntfsfix),
             hasExt4fuse: fileExists(paths.ext4fuse),
-            hasE2fsprogs: fileExists(paths.e2fsck),
+            hasE2fsprogs: fileExists(paths.e2fsck) && fileExists(paths.mkfsExt4),
             helperVersion: helperProtocolVersion,
             appVersion: helperProtocolVersion,
             conflictingDrivers: ConflictingDrivers.detect(filesystemBundles: filesystemBundles))

@@ -96,6 +96,8 @@ final class DiskManagerModel {
         gate.eventApplied()
         helperReachable = true
         volumes = e.applied(to: volumes)
+        // A format removes and recreates its partitions; `format` moves the selection to the result itself.
+        if formatting == nil { selection = e.selection(after: selection) }
     }
 
     /// Opens a volume named in a `driveway://volume/<bsd>` link.
@@ -104,22 +106,35 @@ final class DiskManagerModel {
         selection = bsd
     }
 
+    /// Asks the helper to mount an NTFS drive read/write. If it ends up any other way, the alert says why.
+    func mountReadWrite(_ volume: Volume) async {
+        let request = HelperRequest.mount(DiskRef(volume))
+        guard case .reply(let response) = await operate(on: volume, request, authorized: false) else { return }
+        guard case .volume(let mounted) = response else {
+            unexpected(response, for: request)
+            return
+        }
+        // The list was reloaded; it knows best how the drive is mounted now.
+        let current = volumes.first { $0.bsdName == volume.bsdName } ?? mounted ?? volume
+        if let problem = VolumeList.mountReadWriteProblem(current) { errorMessage = problem }
+    }
+
     func eject(_ volume: Volume) async {
-        await operate(on: volume, .eject(volume.bsdName), authorized: false)
+        await operate(on: volume, .eject(DiskRef(volume)), authorized: false)
     }
 
     func fixAndMount(_ volume: Volume) async {
-        await operate(on: volume, .fixAndMount(volume.bsdName), authorized: true)
+        await operate(on: volume, .fixAndMount(DiskRef(volume)), authorized: true)
     }
 
     /// Checks the drive. NTFS and ext drives are unmounted while it runs. The report lands in `reports`.
     func check(_ volume: Volume) async {
-        await runReport(on: volume, .check(volume.bsdName), authorized: false)
+        await runReport(on: volume, .check(DiskRef(volume)), authorized: false)
     }
 
     /// Repairs the drive; `force` answers yes to every question (ext only). The report lands in `reports`.
     func repair(_ volume: Volume, force: Bool) async {
-        await runReport(on: volume, .repair(volume.bsdName, force: force), authorized: true)
+        await runReport(on: volume, .repair(DiskRef(volume), force: force), authorized: true)
     }
 
     /// Clones an NTFS drive into the image file at `path`.
@@ -129,7 +144,7 @@ final class DiskManagerModel {
             errorMessage = "Save the backup on a different drive."
             return
         }
-        let request = HelperRequest.backup(volume.bsdName, imagePath: path)
+        let request = HelperRequest.backup(DiskRef(volume), imagePath: path)
         guard case .reply(let response) = await operate(on: volume, request, authorized: true) else { return }
         if case .ok = response {
             backups[volume.bsdName] = path

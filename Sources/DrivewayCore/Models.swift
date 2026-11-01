@@ -101,12 +101,18 @@ public struct Volume: Codable, Equatable, Identifiable, Sendable {
     public var lastError: String?
     /// The backend Driveway mounted this volume with; nil unless Driveway mounted it.
     public var backend: MountBackend?
+    /// The size of the whole disk the volume is on; nil when unknown.
+    public var diskSizeBytes: Int64?
+    /// How many other partitions share the whole disk, listed by Driveway or not (BitLocker, swap, raw…),
+    /// leaving out the EFI system partition. Erasing the whole disk erases them all.
+    public var otherPartitionCount: Int
 
     public init(
         bsdName: String, wholeDisk: String, label: String, filesystem: FilesystemKind,
         capacityBytes: Int64, usedBytes: Int64?, mountPoint: String?,
         access: AccessMode, health: VolumeHealth, mountedBy: MountOwner,
-        deviceModel: String, settingsKey: String, lastError: String?, backend: MountBackend? = nil
+        deviceModel: String, settingsKey: String, lastError: String?, backend: MountBackend? = nil,
+        diskSizeBytes: Int64? = nil, otherPartitionCount: Int = 0
     ) {
         self.bsdName = bsdName
         self.wholeDisk = wholeDisk
@@ -122,6 +128,32 @@ public struct Volume: Codable, Equatable, Identifiable, Sendable {
         self.settingsKey = settingsKey
         self.lastError = lastError
         self.backend = backend
+        self.diskSizeBytes = diskSizeBytes
+        self.otherPartitionCount = otherPartitionCount
+    }
+}
+
+extension Volume {
+    /// JSON from before `diskSizeBytes` and `otherPartitionCount` existed decodes with nil and 0.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            bsdName: try c.decode(String.self, forKey: .bsdName),
+            wholeDisk: try c.decode(String.self, forKey: .wholeDisk),
+            label: try c.decode(String.self, forKey: .label),
+            filesystem: try c.decode(FilesystemKind.self, forKey: .filesystem),
+            capacityBytes: try c.decode(Int64.self, forKey: .capacityBytes),
+            usedBytes: try c.decodeIfPresent(Int64.self, forKey: .usedBytes),
+            mountPoint: try c.decodeIfPresent(String.self, forKey: .mountPoint),
+            access: try c.decode(AccessMode.self, forKey: .access),
+            health: try c.decode(VolumeHealth.self, forKey: .health),
+            mountedBy: try c.decode(MountOwner.self, forKey: .mountedBy),
+            deviceModel: try c.decode(String.self, forKey: .deviceModel),
+            settingsKey: try c.decode(String.self, forKey: .settingsKey),
+            lastError: try c.decodeIfPresent(String.self, forKey: .lastError),
+            backend: try c.decodeIfPresent(MountBackend.self, forKey: .backend),
+            diskSizeBytes: try c.decodeIfPresent(Int64.self, forKey: .diskSizeBytes),
+            otherPartitionCount: try c.decodeIfPresent(Int.self, forKey: .otherPartitionCount) ?? 0)
     }
 }
 

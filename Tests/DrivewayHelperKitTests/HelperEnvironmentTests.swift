@@ -19,7 +19,7 @@ import Testing
     let plist = try PropertyListSerialization.data(
         fromPropertyList: ["CFBundleVersion": "5.5.0"], format: .xml, options: 0)
     let paths = ToolPaths()
-    let present: Set<String> = [paths.brew, paths.ntfs3g]
+    let present: Set<String> = [paths.brew, paths.ntfs3g, paths.ntfsfix]
     let inv = HelperEnvironment.toolInventory(
         paths: paths, backend: .ready(.kernel), fileExists: { present.contains($0) }, macFUSEInfoPlist: plist,
         filesystemBundles: ["macfuse.fs", "tuxera_ntfs.fs"])
@@ -34,4 +34,18 @@ import Testing
     let bare = HelperEnvironment.toolInventory(
         paths: paths, backend: .unavailable, fileExists: { _ in false }, macFUSEInfoPlist: nil, filesystemBundles: [])
     #expect(bare.macFUSEVersion == nil)
+}
+
+@Test func helperNeedsTheSameToolsAsTheAppScanner() {
+    let paths = ToolPaths()
+    func inventory(_ present: Set<String>) -> ToolInventory {
+        HelperEnvironment.toolInventory(
+            paths: paths, backend: .ready(.kernel), fileExists: { present.contains($0) }, macFUSEInfoPlist: nil,
+            filesystemBundles: [])
+    }
+    // ntfs-3g without ntfsfix, e2fsck without mkfs.ext4: not enough, as in the app's scan.
+    #expect(!inventory([paths.ntfs3g]).hasNTFS3G)
+    #expect(inventory([paths.ntfs3g, paths.ntfsfix]).hasNTFS3G)
+    #expect(!inventory([paths.e2fsck]).hasE2fsprogs)
+    #expect(inventory([paths.e2fsck, paths.mkfsExt4]).hasE2fsprogs)
 }

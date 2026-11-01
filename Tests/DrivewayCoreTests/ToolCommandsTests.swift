@@ -16,6 +16,13 @@ private let p = ToolPaths()
     #expect(p.mkfsExt4 == "/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4")
     #expect(p.diskutil == "/usr/sbin/diskutil")
     #expect(p.umount == "/sbin/umount")
+    #expect(p.chown == "/usr/sbin/chown")
+}
+
+@Test func chownGivesAFileToAUserWithoutFollowingSymlinks() {
+    #expect(
+        ToolCommands.chown(path: "/Users/me/b.img", uid: 501, gid: 20, paths: p)
+            == Command(executable: "/usr/sbin/chown", arguments: ["-h", "501:20", "/Users/me/b.img"]))
 }
 
 @Test func ntfs3gReadWriteMountKernel() {
@@ -25,7 +32,7 @@ private let p = ToolPaths()
             readOnly: false, uid: 501, gid: 20, backend: .kernel, paths: p)
             == Command(
                 executable: "/opt/homebrew/bin/ntfs-3g",
-                arguments: ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20"]))
+                arguments: ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover"]))
 }
 
 @Test func ntfs3gFSKitPutsBackendFirst() {
@@ -33,7 +40,7 @@ private let p = ToolPaths()
         ToolCommands.ntfs3gMount(
             device: "/dev/disk4s1", mountPoint: "/Volumes/BACKUP", volumeName: "BACKUP",
             readOnly: false, uid: 501, gid: 20, backend: .fskit, paths: p).arguments
-            == ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20"])
+            == ["/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover"])
 }
 
 @Test func ntfs3gReadOnlyAppendsRo() {
@@ -43,15 +50,15 @@ private let p = ToolPaths()
     let fskit = ToolCommands.ntfs3gMount(
         device: "/dev/disk4s1", mountPoint: "/Volumes/BACKUP", volumeName: "BACKUP",
         readOnly: true, uid: 501, gid: 20, backend: .fskit, paths: p)
-    #expect(kernel.arguments.last == "volname=BACKUP,uid=501,gid=20,ro")
-    #expect(fskit.arguments.last == "backend=fskit,volname=BACKUP,uid=501,gid=20,ro")
+    #expect(kernel.arguments.last == "volname=BACKUP,uid=501,gid=20,norecover,ro")
+    #expect(fskit.arguments.last == "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover,ro")
 }
 
 @Test func ntfs3gEscapesVolumeName() {
     let cmd = ToolCommands.ntfs3gMount(
         device: "/dev/disk4s1", mountPoint: "/Volumes/a", volumeName: "a,b",
         readOnly: false, uid: 501, gid: 20, backend: .kernel, paths: p)
-    #expect(cmd.arguments.last == "volname=a\\,b,uid=501,gid=20")
+    #expect(cmd.arguments.last == "volname=a\\,b,uid=501,gid=20,norecover")
 }
 
 @Test func ext4fuseMountBackends() {
@@ -59,13 +66,13 @@ private let p = ToolPaths()
         device: "/dev/disk5s1", mountPoint: "/Volumes/linux_home", volumeName: "linux_home",
         backend: .kernel, paths: p)
     #expect(kernel.executable == "/opt/homebrew/bin/ext4fuse")
-    #expect(kernel.arguments == ["/dev/disk5s1", "/Volumes/linux_home", "-o", "volname=linux_home"])
+    #expect(kernel.arguments == ["/dev/disk5s1", "/Volumes/linux_home", "-o", "volname=linux_home,allow_other,fsname=/dev/disk5s1"])
     let fskit = ToolCommands.ext4fuseMount(
         device: "/dev/disk5s1", mountPoint: "/Volumes/linux_home", volumeName: "linux_home",
         backend: .fskit, paths: p)
     #expect(
         fskit.arguments == [
-            "/dev/disk5s1", "/Volumes/linux_home", "-o", "backend=fskit,volname=linux_home",
+            "/dev/disk5s1", "/Volumes/linux_home", "-o", "backend=fskit,volname=linux_home,allow_other,fsname=/dev/disk5s1",
         ])
 }
 
@@ -94,7 +101,7 @@ private let p = ToolPaths()
         ToolCommands.ntfsclone(device: "/dev/disk4s1", imagePath: "/Users/me/b.img", paths: p)
             == Command(
                 executable: "/opt/homebrew/sbin/ntfsclone",
-                arguments: ["--save-image", "--output", "/Users/me/b.img", "/dev/disk4s1"]))
+                arguments: ["--save-image", "--force", "--overwrite", "/Users/me/b.img", "/dev/disk4s1"]))
 }
 
 @Test func diskutilPassesArgsThrough() {
@@ -171,4 +178,10 @@ private let p = ToolPaths()
             == Command(
                 executable: "/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4",
                 arguments: ["-F", "-L", "DATA", "/dev/disk4s2"]))
+}
+
+@Test func ntfscloneForcesPastTheDirtyFlag() {
+    let c = ToolCommands.ntfsclone(device: "/dev/disk4s1", imagePath: "/Users/x/b.img", paths: p)
+    #expect(c.executable == "/opt/homebrew/sbin/ntfsclone")
+    #expect(c.arguments.contains("--force"))
 }

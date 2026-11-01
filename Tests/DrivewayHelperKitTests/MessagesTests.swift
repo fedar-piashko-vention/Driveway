@@ -4,7 +4,8 @@ import Foundation
 import Testing
 
 private let sampleFormat = FormatRequest(
-    filesystem: .ntfs, label: "NEW", scheme: .mbr, target: .wholeDisk("disk4"), confirmation: "BACKUP")
+    filesystem: .ntfs, label: "NEW", scheme: .mbr, target: .wholeDisk("disk4"), confirmation: "BACKUP",
+    expectedKey: "K")
 
 private let sampleVolume = Volume(
     bsdName: "disk4s1", wholeDisk: "disk4", label: "BACKUP", filesystem: .ntfs, capacityBytes: 10,
@@ -17,8 +18,8 @@ private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
 
 @Test func requestRoundTripAndAuthTable() throws {
     let all: [HelperRequest] = [
-        .listVolumes, .mount("disk4s1"), .unmount("disk4s1"), .eject("disk4s1"), .fixAndMount("disk4s1"),
-        .check("disk4s1"), .repair("disk4s1", force: true), .backup("disk4s1", imagePath: "/Users/x/b.img"),
+        .listVolumes, .mount(ref("disk4s1")), .unmount(ref("disk4s1")), .eject(ref("disk4s1")), .fixAndMount(ref("disk4s1")),
+        .check(ref("disk4s1")), .repair(ref("disk4s1"), force: true), .backup(ref("disk4s1"), imagePath: "/Users/x/b.img"),
         .format(sampleFormat), .getSettings, .setSettings(DrivewaySettings(alwaysReadOnly: ["K"])),
         .helperVersion, .backendStatus,
     ]
@@ -26,11 +27,11 @@ private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
 
     let authorized = all.filter(\.requiresAuthorization)
     #expect(authorized == [
-        .fixAndMount("disk4s1"), .repair("disk4s1", force: true), .backup("disk4s1", imagePath: "/Users/x/b.img"),
+        .fixAndMount(ref("disk4s1")), .repair(ref("disk4s1"), force: true), .backup(ref("disk4s1"), imagePath: "/Users/x/b.img"),
         .format(sampleFormat),
     ])
-    #expect(HelperRequest.repair("disk4s1", force: false).requiresAuthorization)
-    #expect(!HelperRequest.mount("disk4s1").requiresAuthorization)
+    #expect(HelperRequest.repair(ref("disk4s1"), force: false).requiresAuthorization)
+    #expect(!HelperRequest.mount(ref("disk4s1")).requiresAuthorization)
 }
 
 @Test func responsesAndEventsRoundTrip() throws {

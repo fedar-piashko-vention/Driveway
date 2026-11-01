@@ -6,23 +6,29 @@ public enum CheckMode: String, Codable, Sendable {
 
 /// The only place external tool command lines are defined. The root helper runs these.
 public enum ToolCommands {
-    /// ntfs-3g mount. Options: `[backend=fskit,]volname=<label>,uid=<uid>,gid=<gid>[,ro]`.
+    /// ntfs-3g mount. Options: `[backend=fskit,]volname=<label>,uid=<uid>,gid=<gid>,norecover[,ro]`.
+    ///
+    /// `norecover` because ntfs-3g's default, `recover`, clears the Windows logfile of a drive that wasn't
+    /// unmounted properly and mounts it read/write: a silent fix. With `norecover` such a drive is refused,
+    /// and Driveway falls back to a read-only mount with Fix & mount on offer.
     public static func ntfs3gMount(
         device: String, mountPoint: String, volumeName: String, readOnly: Bool,
         uid: UInt32, gid: UInt32, backend: MountBackend, paths: ToolPaths
     ) -> Command {
-        var options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),uid=\(uid),gid=\(gid)"
+        var options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),uid=\(uid),gid=\(gid),norecover"
         if readOnly { options += ",ro" }
         return Command(
             executable: paths.ntfs3g,
             arguments: [device, mountPoint, "-o", backendPrefix(backend) + options])
     }
 
-    /// ext4fuse mount (read-only by nature; needs no uid/gid). Options: `[backend=fskit,]volname=<label>`.
+    /// ext4fuse mount (read-only by nature; needs no uid/gid).
+    /// Options: `[backend=fskit,]volname=<label>,allow_other,fsname=<device>`. ntfs-3g adds `allow_other` and
+    /// `fsname` itself; ext4fuse doesn't, and without `allow_other` a mount made by root is closed to the user.
     public static func ext4fuseMount(
         device: String, mountPoint: String, volumeName: String, backend: MountBackend, paths: ToolPaths
     ) -> Command {
-        let options = "volname=\(MountNaming.fuseOptionEscaped(volumeName))"
+        let options = "volname=\(MountNaming.fuseOptionEscaped(volumeName)),allow_other,fsname=\(MountNaming.fuseOptionEscaped(device))"
         return Command(
             executable: paths.ext4fuse,
             arguments: [device, mountPoint, "-o", backendPrefix(backend) + options])
@@ -35,9 +41,17 @@ public enum ToolCommands {
         return Command(executable: paths.ntfsfix, arguments: [flag, device])
     }
 
-    /// Saves a metadata-only image of an NTFS volume (a safety backup before a repair).
+    /// Saves an image of an NTFS volume in ntfsclone's special format: every cluster in use (all files and
+    /// metadata, not only metadata), so it takes as long as copying the used data. A safety backup before a
+    /// repair. `--force` because the drives that need "Back up first" are the ones with the dirty flag set.
+    /// `--overwrite` because `--output` refuses an existing file, and the save panel has already asked to replace it.
     public static func ntfsclone(device: String, imagePath: String, paths: ToolPaths) -> Command {
-        Command(executable: paths.ntfsclone, arguments: ["--save-image", "--output", imagePath, device])
+        Command(executable: paths.ntfsclone, arguments: ["--save-image", "--force", "--overwrite", imagePath, device])
+    }
+
+    /// Gives a file the helper made to a user: `chown -h <uid>:<gid> <path>` (`-h`: a symlink itself, never its target).
+    public static func chown(path: String, uid: UInt32, gid: UInt32, paths: ToolPaths) -> Command {
+        Command(executable: paths.chown, arguments: ["-h", "\(uid):\(gid)", path])
     }
 
     /// `.check` is `-n -f`, `.repair` is `-p -f`, `.repairForce` is `-y -f`.

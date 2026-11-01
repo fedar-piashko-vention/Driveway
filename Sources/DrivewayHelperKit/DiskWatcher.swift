@@ -8,7 +8,7 @@ import os
 /// Feeds DiskArbitration's disk events to the helper service on a serial queue of its own.
 ///
 /// Callbacks never block. Appeared and disappeared events start a task that calls the service (which may
-/// wait up to 30 minutes behind an operation on the same disk) and then broadcasts the result. The mount
+/// wait as long as a check, repair, backup or format on the same disk takes) and then broadcasts the result. The mount
 /// approval callback must answer synchronously, so it only calls `shouldApproveMacOSMount`, which takes
 /// one lock and reads nothing from disk.
 public final class DiskWatcher: @unchecked Sendable {

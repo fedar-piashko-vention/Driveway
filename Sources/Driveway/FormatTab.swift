@@ -83,7 +83,7 @@ struct FormatTab: View {
                     Button("Erase…") {
                         pending = PendingErase(
                             filesystem: filesystem, label: label, scheme: scheme, target: target,
-                            wholeDisk: erasesWholeDisk)
+                            wholeDisk: erasesWholeDisk, expectedKey: volume.settingsKey)
                     }
                         .disabled(!canErase)
                     if isBusy { ProgressView().controlSize(.small) }
@@ -117,10 +117,13 @@ private struct PendingErase: Identifiable {
     let scheme: PartitionScheme
     let target: FormatTarget
     let wholeDisk: Bool
+    /// The identity of the drive the form was for; the helper refuses the erase if the BSD name now names another.
+    let expectedKey: String
 
     func request(confirmation: String) -> FormatRequest {
         FormatRequest(
-            filesystem: filesystem, label: label, scheme: scheme, target: target, confirmation: confirmation)
+            filesystem: filesystem, label: label, scheme: scheme, target: target, confirmation: confirmation,
+            expectedKey: expectedKey)
     }
 }
 
