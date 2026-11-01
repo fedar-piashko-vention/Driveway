@@ -73,6 +73,8 @@ scripts/build-app.sh 0.1.0         # build/Driveway.app and build/Driveway-0.1.0
 
 `build-app.sh` builds for arm64, assembles the app with its helper and agent, ad-hoc signs everything with the hardened runtime, and creates the dmg. The version must look like `1.2.3` or `1.2.3-rc1`.
 
+The app icon is `Packaging/Driveway.icns`. It is rendered from the gradient in `Packaging/Icon/gradient-source.png` by `scripts/make-icon.swift`. To change it, edit either file, then run `scripts/make-icon.sh` and commit the new `.icns`.
+
 CI runs on GitHub's `macos-15` (Apple Silicon) runner. That image's default Xcode is 16.4, so the workflows select the Xcode 26.3 that the image also ships (`sudo xcode-select -s /Applications/Xcode_26.3.app`), the same version used for local builds. Pushing a tag that starts with `v` runs the release workflow, which tests, builds the dmg and attaches it to a GitHub release with the notes from `.github/release-notes.md`.
 
 ## How it works
