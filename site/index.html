@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Driveway: NTFS and ext drives on your Mac, free</title>
+  <meta name="description" content="Use Windows (NTFS) and Linux (ext) drives on your Apple Silicon Mac. Free and open source. No account, no licence key, nothing to buy.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fbf8f3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11151d" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Driveway">
+  <meta property="og:description" content="Use Windows (NTFS) and Linux (ext) drives on your Apple Silicon Mac. Free and open source.">
+  <meta property="og:url" content="https://fedar-piashko-vention.github.io/Driveway/">
+  <meta property="og:image" content="https://fedar-piashko-vention.github.io/Driveway/images/disk-manager.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <p id="copy-status" class="visually-hidden" aria-live="polite"></p>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#top" aria-label="Driveway, back to top">
+        <img src="favicon.png" width="28" height="28" alt="">
+        <span>Driveway</span>
+      </a>
+      <nav aria-label="Sections">
+        <ul>
+          <li class="nav-optional"><a href="#features">Features</a></li>
+          <li class="nav-optional"><a href="#compatibility">Your Mac</a></li>
+          <li><a href="#install">Install</a></li>
+          <li class="nav-optional"><a href="#questions">Questions</a></li>
+          <li><a href="https://github.com/fedar-piashko-vention/Driveway">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="wrap">
+        <img class="hero-icon" src="icon-320.png" width="160" height="160" alt="Driveway app icon">
+        <h1>Driveway</h1>
+        <p class="lead">Use Windows (NTFS) and Linux (ext) drives on your Apple Silicon&nbsp;Mac.</p>
+        <p class="sub">Free and open source. No account, no licence key, nothing to buy.</p>
+
+        <div class="cta">
+          <a class="button primary" href="#install">Install Driveway</a>
+          <a class="button secondary" href="https://github.com/fedar-piashko-vention/Driveway/releases/latest">Latest release</a>
+        </div>
+
+        <div class="hero-command">
+          <p class="hero-command-label">Already have <a href="https://brew.sh">Homebrew</a>? Paste this into Terminal:</p>
+          <div class="command">
+            <code id="cmd-hero">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/fedar-piashko-vention/Driveway/main/scripts/install.sh)"</code>
+            <button class="copy" type="button" data-copy="cmd-hero" aria-label="Copy the install command">Copy</button>
+          </div>
+          <p class="meta">Apple Silicon (M1 or later) · macOS 15.4 or later · <a href="#install">Step-by-step guide</a></p>
+        </div>
+
+        <figure class="hero-shot">
+          <img src="images/disk-manager.png" width="1012" height="584" alt="Driveway's Disk Manager showing an NTFS drive mounted read/write">
+        </figure>
+      </div>
+    </section>
+
+    <section class="intro">
+      <div class="wrap narrow">
+        <p>Macs can open drives formatted on Windows, but they can't save anything to them. Driveway is a free alternative to Tuxera NTFS for Mac and Paragon NTFS for anyone who can't buy them or doesn't want to pay for them. Plug in a drive and Driveway mounts it so you can copy, rename and delete files in Finder as usual. It can also check, repair, back up and format drives.</p>
+        <p class="muted">Driveway doesn't contain a filesystem driver of its own. It sets up and runs well-known free tools for you: <a href="https://macfuse.github.io">macFUSE</a>, <a href="https://github.com/tuxera/ntfs-3g">ntfs-3g</a> and <a href="https://e2fsprogs.sourceforge.net">e2fsprogs</a>.</p>
+      </div>
+    </section>
+
+    <section id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <h2 id="features-title">What it does</h2>
+        <ul class="features">
+          <li>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M3 12.5h18"/><circle cx="17" cy="14.7" r="1"/></svg>
+            <h3>Plug in and write</h3>
+            <p>NTFS drives mount read/write by themselves, whether or not the Driveway window is open. A drive that was already plugged in when you logged in is taken over within a few seconds.</p>
+          </li>
+          <li>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16M12 9h6M12 13h6"/></svg>
+            <h3>Disk Manager</h3>
+            <p>One window lists your drives, with three tabs: <b>Info</b>, <b>Check &amp; Repair</b> and <b>Format</b>.</p>
+          </li>
+          <li>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+            <h3>Setup does the installing</h3>
+            <p>The Setup screen shows what your Mac can do, what's missing, and installs it for you.</p>
+          </li>
+          <li>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/></svg>
+            <h3>Your files come first</h3>
+            <p>If Windows didn't shut a drive down properly, Driveway mounts it read-only and tells you, instead of writing to it and risking your files. One click, <b>Fix &amp; mount read/write</b>, repairs it when you're ready.</p>
+          </li>
+          <li>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M4 19h16"/></svg>
+            <h3>Back up before a repair</h3>
+            <p><b>Back up first</b> saves a complete copy of the drive to a file, with a progress bar.</p>
+          </li>
+          <li>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H10l2 2h5.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/></svg>
+            <h3>Linux drives too</h3>
+            <p>ext2, ext3 and ext4 drives open read-only and show up in Finder's sidebar.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="gallery" aria-labelledby="gallery-title">
+      <div class="wrap">
+        <h2 id="gallery-title" class="visually-hidden">Screenshots</h2>
+        <figure class="shot">
+          <img src="images/check-repair.png" width="1012" height="584" loading="lazy" alt="The Check &amp; Repair tab">
+          <figcaption><b>Check &amp; Repair</b> checks the drive for problems and fixes common ones, such as a drive that was unplugged without ejecting. <b>Back up first</b> saves a copy of the whole drive to a file before you repair it.</figcaption>
+        </figure>
+        <div class="shot-pair">
+          <figure class="shot">
+            <img src="images/setup.png" width="652" height="475" loading="lazy" alt="Driveway's Setup screen">
+            <figcaption><b>Setup</b> lists four features and shows what each one still needs. Click <b>Unlock everything</b> and it goes through what's missing, one item at a time.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="images/finder-sidebar.png" width="1535" height="809" loading="lazy" alt="An ext drive in Finder's sidebar">
+            <figcaption><b>Linux (ext) drives</b> open read-only and appear in Finder's sidebar like any other drive.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="compatibility" aria-labelledby="compat-title">
+      <div class="wrap">
+        <h2 id="compat-title">What works on your Mac</h2>
+        <p class="section-lead">What Driveway can do depends on your version of macOS and on your Mac's security settings. You don't need to work this out yourself: Setup checks your Mac and shows each feature as ready, missing something, or not available.</p>
+
+        <div class="table-wrap">
+          <table class="compat">
+            <thead>
+              <tr>
+                <th scope="col"><span class="visually-hidden">Feature</span></th>
+                <th scope="col">macOS 15, standard security</th>
+                <th scope="col">macOS 26 or later, standard security</th>
+                <th scope="col">Kernel extensions already allowed</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">See and copy files from NTFS drives</th>
+                <td data-label="macOS 15, standard security"><span class="yes">Yes</span></td>
+                <td data-label="macOS 26 or later, standard security"><span class="yes">Yes</span></td>
+                <td data-label="Kernel extensions already allowed"><span class="yes">Yes</span></td>
+              </tr>
+              <tr class="key-row">
+                <th scope="row">Save files to NTFS drives</th>
+                <td data-label="macOS 15, standard security"><span class="no">No</span></td>
+                <td data-label="macOS 26 or later, standard security"><span class="maybe">Expected, not yet tested</span></td>
+                <td data-label="Kernel extensions already allowed"><span class="yes">Yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Check &amp; Repair, Back up first (NTFS)</th>
+                <td data-label="macOS 15, standard security"><span class="yes">Yes</span></td>
+                <td data-label="macOS 26 or later, standard security"><span class="yes">Yes</span></td>
+                <td data-label="Kernel extensions already allowed"><span class="yes">Yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Format as exFAT or FAT32</th>
+                <td data-label="macOS 15, standard security"><span class="yes">Yes</span></td>
+                <td data-label="macOS 26 or later, standard security"><span class="yes">Yes</span></td>
+                <td data-label="Kernel extensions already allowed"><span class="yes">Yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Format as NTFS</th>
+                <td data-label="macOS 15, standard security"><span class="no">No</span></td>
+                <td data-label="macOS 26 or later, standard security"><span class="maybe">Expected, not yet tested</span></td>
+                <td data-label="Kernel extensions already allowed"><span class="yes">Yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Linux (ext) drives</th>
+                <td data-label="macOS 15, standard security"><span class="no">No</span></td>
+                <td data-label="macOS 26 or later, standard security"><span class="maybe">Expected, not yet tested</span></td>
+                <td data-label="Kernel extensions already allowed"><span class="yes">Yes</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="notes">
+          <div>
+            <h3>Standard security</h3>
+            <p>This is how every Mac comes from the factory. You almost certainly have it unless you changed it yourself in Recovery.</p>
+          </div>
+          <div>
+            <h3>Kernel extensions already allowed</h3>
+            <p>Your Mac was set up earlier to accept third-party system extensions, usually because Tuxera, Paragon or another disk tool was installed on it at some point. If that's the case, Driveway can save files to NTFS drives on any supported macOS.</p>
+          </div>
+          <div>
+            <h3>Why macOS 15 can't save files with standard security</h3>
+            <p>On a Mac with standard security, macFUSE uses Apple's new FSKit system. FSKit is broken on recent macOS 15.7 updates: every attempt to mount a drive fails. When Driveway sees this, Setup shows <b>Write to NTFS drives</b> as <b>Not available on this Mac yet</b>, and your drives stay readable as usual. Driveway tries again after each macOS or macFUSE update.</p>
+          </div>
+          <div>
+            <h3>macOS 26 and later</h3>
+            <p>Nobody has tested Driveway on macOS 26 or later yet. Try it first with a drive that has nothing important on it, and please <a href="https://github.com/fedar-piashko-vention/Driveway/issues/new">tell us how it went</a>, whether it worked or not.</p>
+          </div>
+        </div>
+
+        <p class="callout"><b>Driveway never asks you to lower your Mac's security</b>, and it never changes security settings itself.</p>
+      </div>
+    </section>
+
+    <section id="install" class="install" aria-labelledby="install-title">
+      <div class="wrap narrow">
+        <h2 id="install-title">Install</h2>
+        <p class="section-lead">The whole process takes about 20 minutes, most of it waiting for downloads.</p>
+
+        <ul class="requirements" aria-label="You need">
+          <li>A Mac with Apple Silicon (M1 or later)</li>
+          <li>macOS 15.4 or later</li>
+          <li>An administrator account</li>
+          <li>An internet connection</li>
+        </ul>
+
+        <ol class="steps">
+          <li>
+            <h3>Remove Tuxera or Paragon, if you have them</h3>
+            <p>If Tuxera NTFS for Mac or Paragon NTFS (or Paragon extFS) is installed, remove it first, using the uninstaller that came with it. These programs grab drives before Driveway can. If you've never installed them, skip this step.</p>
+          </li>
+          <li>
+            <h3>Install Homebrew</h3>
+            <p><a href="https://brew.sh">Homebrew</a> is a free tool that installs software from the command line. Driveway uses it to install macFUSE and ntfs-3g for you. You only need to do this once.</p>
+            <p>Open <b>Terminal</b> (press ⌘ Space, type <kbd>Terminal</kbd> and press Return), paste this line and press Return:</p>
+            <div class="command">
+              <code id="cmd-brew">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code>
+              <button class="copy" type="button" data-copy="cmd-brew" aria-label="Copy the Homebrew install command">Copy</button>
+            </div>
+            <p class="small">When it asks for your <b>Password</b>, type the password you use to log in to your Mac. Nothing appears on screen while you type. That's normal. It's finished when you see <b>Installation successful!</b></p>
+          </li>
+          <li class="step-main">
+            <h3>Install Driveway</h3>
+            <p>In Terminal, paste this line and press Return:</p>
+            <div class="command">
+              <code id="cmd-install">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/fedar-piashko-vention/Driveway/main/scripts/install.sh)"</code>
+              <button class="copy" type="button" data-copy="cmd-install" aria-label="Copy the Driveway install command">Copy</button>
+            </div>
+            <p class="small">It downloads the latest version of Driveway, puts it in your <b>Applications</b> folder and opens it. If it asks for your <b>Password</b>, type the password you use to log in to your Mac. To update Driveway later, run the same line again.</p>
+          </li>
+          <li>
+            <h3>Run Setup</h3>
+            <p>Driveway opens with the Setup screen. Click <b>Unlock everything</b> and follow it. It installs what's missing and takes you to the right place in System Settings when macOS needs your approval, including <b>Full Disk Access</b> for the Driveway helper.</p>
+          </li>
+          <li>
+            <h3>Plug in a drive</h3>
+            <p>Within a few seconds it appears on the desktop and in Finder's sidebar, ready to use. Eject it before you unplug it.</p>
+          </li>
+        </ol>
+
+        <div class="why">
+          <h3>Why Terminal and not a normal download?</h3>
+          <p>Driveway is not signed with a paid Apple developer certificate. If you download it in a web browser, macOS says the app "is damaged and can't be opened", and offers no way to open it anyway. A file downloaded in Terminal doesn't get that check. The app isn't damaged: the warning is about how it's signed, not about what it does. All of Driveway's source code, including <a href="https://github.com/fedar-piashko-vention/Driveway/blob/main/scripts/install.sh">the install script</a>, is public for anyone to read. Whether to trust it is your choice.</p>
+        </div>
+
+        <details class="fallback">
+          <summary>Prefer to download it yourself?</summary>
+          <ol>
+            <li>Go to the <a href="https://github.com/fedar-piashko-vention/Driveway/releases/latest">latest release</a> and click <code>Driveway-&lt;version&gt;.dmg</code> under <b>Assets</b> to download it.</li>
+            <li>Open the downloaded file and drag <b>Driveway</b> onto <b>Applications</b>.</li>
+            <li>Open <b>Terminal</b>, paste this line and press Return. It tells macOS that you trust this copy of Driveway:
+              <div class="command">
+                <code id="cmd-xattr">xattr -dr com.apple.quarantine /Applications/Driveway.app</code>
+                <button class="copy" type="button" data-copy="cmd-xattr" aria-label="Copy the quarantine command">Copy</button>
+              </div>
+            </li>
+            <li>Open Driveway from <b>Applications</b>.</li>
+          </ol>
+        </details>
+
+        <p class="links">
+          <a class="button secondary" href="https://github.com/fedar-piashko-vention/Driveway#install">Full install guide</a>
+          <a class="button secondary" href="https://github.com/fedar-piashko-vention/Driveway/releases/latest">Latest release</a>
+        </p>
+      </div>
+    </section>
+
+    <section id="questions" aria-labelledby="questions-title">
+      <div class="wrap narrow">
+        <h2 id="questions-title">Questions and problems</h2>
+        <div class="faq">
+          <details>
+            <summary>Is Driveway really free?</summary>
+            <p>Yes. It's open source under the MIT licence. There's no paid version, no trial and no account. The tools it relies on (macFUSE, ntfs-3g and e2fsprogs) are free too.</p>
+          </details>
+          <details>
+            <summary>Is it safe for my files?</summary>
+            <p>Driveway is careful by design. It never writes to a drive that Windows left in an unfinished state without asking you first, it offers a backup before repairs, and it refuses to touch the disk your Mac runs from. Still, no tool is perfect, so keep a backup of anything important, as you would with any drive.</p>
+          </details>
+          <details>
+            <summary>My drive is read-only</summary>
+            <p>Open Driveway and select the drive. The <b>Info</b> tab says why. The most common reasons: Setup isn't finished, or it says <b>Write to NTFS drives</b> is <b>Not available on this Mac yet</b> (see <a href="#compatibility">What works on your Mac</a>); Windows didn't shut the drive down cleanly or is hibernating; Full Disk Access is missing; or Tuxera or Paragon is still installed.</p>
+          </details>
+          <details>
+            <summary>macOS says Driveway "is damaged and can't be opened"</summary>
+            <p>You downloaded Driveway in a web browser. The app isn't damaged: macOS says this about apps that aren't signed with a paid Apple developer certificate. Click <b>Cancel</b>, not <b>Move to Bin</b>, then install Driveway with the Terminal line in <a href="#install">Install</a>. Or, if Driveway is already in Applications, run the <code>xattr</code> line from "Prefer to download it yourself?" above.</p>
+          </details>
+          <details>
+            <summary>How fast is it?</summary>
+            <p>Fast enough for everyday copying, but slower than Tuxera or Paragon. ntfs-3g is a different kind of driver from theirs, and that's the trade-off for being free. Copying many small files is slower than copying a few large ones.</p>
+          </details>
+          <details>
+            <summary>Does it work on Intel Macs?</summary>
+            <p>It hasn't been tested on Intel Macs, and the download is built for Apple Silicon only.</p>
+          </details>
+          <details>
+            <summary>Something else went wrong</summary>
+            <p>Please <a href="https://github.com/fedar-piashko-vention/Driveway/issues/new">open an issue</a>. It helps to include your macOS version and Mac model, what you did and what you expected, and a screenshot of Setup and of the drive's <b>Info</b> tab. The <a href="https://github.com/fedar-piashko-vention/Driveway#something-else-went-wrong">README</a> shows how to attach Driveway's log.</p>
+          </details>
+        </div>
+        <p class="more">More answers, including how to uninstall, are in the <a href="https://github.com/fedar-piashko-vention/Driveway#questions-and-problems">README</a>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <p><img src="favicon.png" width="20" height="20" alt=""> Driveway is free and open source under the <a href="https://github.com/fedar-piashko-vention/Driveway/blob/main/LICENSE">MIT licence</a>.</p>
+      <p><a href="https://github.com/fedar-piashko-vention/Driveway">Source code</a> · <a href="https://github.com/fedar-piashko-vention/Driveway/releases">Releases</a> · <a href="https://github.com/fedar-piashko-vention/Driveway/issues">Issues</a></p>
+    </div>
+  </footer>
+</body>
+</html>

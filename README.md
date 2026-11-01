@@ -10,6 +10,8 @@
 </p>
 
 <p align="center">
+  <a href="https://fedar-piashko-vention.github.io/Driveway/"><b>Website</b></a>
+  ·
   <a href="#install"><b>Install guide</b></a>
   ·
   <a href="https://github.com/fedar-piashko-vention/Driveway/releases/latest">Latest release</a>
@@ -325,6 +327,8 @@ scripts/build-app.sh 0.1.0         # build/Driveway.app and build/Driveway-0.1.0
 `build-app.sh` builds for arm64, assembles the app with its helper, agent and ext filesystem bundle, signs everything ad-hoc with the hardened runtime, and creates the dmg. The version must look like `1.2.3` or `1.2.3-rc1`.
 
 The app icon is `Packaging/Driveway.icns`. It's rendered from the gradient in `Packaging/Icon/gradient-source.png` by `scripts/make-icon.swift`. To change it, edit either file, then run `scripts/make-icon.sh` and commit the new `.icns`.
+
+The website is in `site/`. `scripts/build-site.sh` combines it with the screenshots from `docs/images` into `build/site`, and the Website workflow publishes it to GitHub Pages whenever `main` changes it. To preview it, run `scripts/build-site.sh` and then `python3 -m http.server --directory build/site`.
 
 CI runs on GitHub's `macos-15` (Apple Silicon) runner and selects the Xcode 26.3 that the image ships. Pushing a tag that starts with `v` runs the release workflow, which tests, builds the dmg and attaches it to a GitHub release with the notes from `.github/release-notes.md`.
 
