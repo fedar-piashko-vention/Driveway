@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # macos-15's default Xcode is 16.4 (Swift 6.1). Driveway is built and tested with
+      # Xcode 26.3 (Swift 6.2), which the image also ships.
+      - name: Select Xcode 26.3
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          xcodebuild -version
+          swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Build app and dmg
+        run: scripts/build-app.sh 0.0.0-ci
