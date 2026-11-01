@@ -156,3 +156,19 @@ private let p = ToolPaths()
     #expect(second != first)
     #expect(second.hasPrefix(first))
 }
+
+@Test func mkntfsIsQuickWithLabel() {
+    #expect(
+        ToolCommands.mkntfs(device: "/dev/disk4s2", label: "BACKUP", paths: p)
+            == Command(
+                executable: "/opt/homebrew/sbin/mkntfs",
+                arguments: ["--quick", "--label", "BACKUP", "/dev/disk4s2"]))
+}
+
+@Test func mkfsExt4ForcesAndLabels() {
+    #expect(
+        ToolCommands.mkfsExt4(device: "/dev/disk4s2", label: "DATA", paths: p)
+            == Command(
+                executable: "/opt/homebrew/opt/e2fsprogs/sbin/mkfs.ext4",
+                arguments: ["-F", "-L", "DATA", "/dev/disk4s2"]))
+}

@@ -51,6 +51,17 @@ public enum ToolCommands {
         return Command(executable: paths.e2fsck, arguments: [flag, "-f", device])
     }
 
+    /// Quick NTFS format: `mkntfs --quick --label <label> <device>`.
+    public static func mkntfs(device: String, label: String, paths: ToolPaths) -> Command {
+        Command(executable: paths.mkntfs, arguments: ["--quick", "--label", label, device])
+    }
+
+    /// ext4 format: `mkfs.ext4 -F -L <label> <device>` (`-F` because the device is a whole partition
+    /// that may carry an older signature).
+    public static func mkfsExt4(device: String, label: String, paths: ToolPaths) -> Command {
+        Command(executable: paths.mkfsExt4, arguments: ["-F", "-L", label, device])
+    }
+
     public static func diskutil(_ args: String..., paths: ToolPaths) -> Command {
         Command(executable: paths.diskutil, arguments: args)
     }
