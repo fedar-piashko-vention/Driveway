@@ -32,13 +32,16 @@ public enum HelperRequest: Codable, Equatable, Sendable {
     case setSettings(DrivewaySettings)
     case helperVersion
     case backendStatus
+    /// What macOS lets the helper do. Answered with `.permissions`; an older helper can't read it and answers with
+    /// an error, which the app takes as "unknown".
+    case helperPermissions
 
     /// True for the operations that write repair data or erase: they need a fresh administrator authorization.
     public var requiresAuthorization: Bool {
         switch self {
         case .fixAndMount, .repair, .backup, .format: true
         case .listVolumes, .mount, .unmount, .eject, .check, .getSettings, .setSettings, .helperVersion,
-            .backendStatus:
+            .backendStatus, .helperPermissions:
             false
         }
     }
@@ -60,8 +63,27 @@ public enum HelperResponse: Codable, Equatable, Sendable {
     case settings(DrivewaySettings)
     case version(String)
     case backend(BackendAvailability)
+    case permissions(HelperPermissions)
     case ok
     case error(HelperError)
+}
+
+/// The privacy permissions the helper has. Fields are added over time, so decoding tolerates missing keys; nil means
+/// the helper couldn't tell.
+public struct HelperPermissions: Codable, Equatable, Sendable {
+    /// Full Disk Access, which the helper needs to open external drives' raw devices.
+    public var fullDiskAccess: Bool?
+
+    public init(fullDiskAccess: Bool?) {
+        self.fullDiskAccess = fullDiskAccess
+    }
+
+    private enum CodingKeys: String, CodingKey { case fullDiskAccess }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fullDiskAccess = try c.decodeIfPresent(Bool.self, forKey: .fullDiskAccess)
+    }
 }
 
 /// Why an NTFS volume ended up mounted read-only by macOS instead of read/write by Driveway.

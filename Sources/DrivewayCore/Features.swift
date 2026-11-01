@@ -11,6 +11,9 @@ public enum Requirement: Equatable, Hashable, Sendable {
     case macFUSEApproval(MountBackend)
     case ntfs3g, ext4fuse, e2fsprogs
     case helper, helperUpdate
+    /// Driveway's helper may open external drives' raw devices only with Full Disk Access (macOS privacy
+    /// protection). Listed once the helper is installed and has said it doesn't have it.
+    case fullDiskAccess
 }
 
 public enum BackendAvailability: Equatable, Codable, Sendable {
@@ -41,11 +44,14 @@ public struct ToolInventory: Equatable, Sendable {
     public var helperVersion: String?
     public var appVersion: String
     public var conflictingDrivers: [String]
+    /// Whether the helper has Full Disk Access; nil when the helper didn't say (not installed, not running, or
+    /// a helper from before it could tell).
+    public var fullDiskAccess: Bool?
 
     public init(
         hasHomebrew: Bool, macFUSEVersion: SemanticVersion?, backend: BackendAvailability,
         hasNTFS3G: Bool, hasExt4fuse: Bool, hasE2fsprogs: Bool,
-        helperVersion: String?, appVersion: String, conflictingDrivers: [String]
+        helperVersion: String?, appVersion: String, conflictingDrivers: [String], fullDiskAccess: Bool? = nil
     ) {
         self.hasHomebrew = hasHomebrew
         self.macFUSEVersion = macFUSEVersion
@@ -56,6 +62,7 @@ public struct ToolInventory: Equatable, Sendable {
         self.helperVersion = helperVersion
         self.appVersion = appVersion
         self.conflictingDrivers = conflictingDrivers
+        self.fullDiskAccess = fullDiskAccess
     }
 }
 
@@ -97,6 +104,8 @@ public func featureStates(
         let brewItemMissing = (macFUSE && !macFUSEReady) || tools.contains { $0.missing }
         if brewItemMissing && !inv.hasHomebrew { missing.insert(.homebrew, at: 0) }
         if let helper = helperRequirement(inv) { missing.append(helper) }
+        // Every feature here opens a drive's raw device in the helper. Reading NTFS doesn't: macOS does that.
+        if inv.helperVersion != nil, inv.fullDiskAccess == false { missing.append(.fullDiskAccess) }
         return missing.isEmpty ? .ready : .locked(missing: missing)
     }
 
@@ -164,6 +173,7 @@ public enum InstallStep: Equatable, Sendable {
         case .ext4fuse: .runBrew(["install", "gromgit/fuse/ext4fuse-mac"])
         case .e2fsprogs: .runBrew(["install", "e2fsprogs"])
         case .helper, .helperUpdate: .installHelper
+        case .fullDiskAccess: .openSettings(FullDiskAccess.settingsURL)
         }
     }
 }

@@ -96,8 +96,10 @@ public enum ToolCommands {
 
     /// `umount <mount point>`, for a FUSE mount DiskArbitration doesn't know about: macOS can't recognise ext,
     /// so `diskutil unmount` answers "already unmounted" while ext4fuse's mount is still there.
-    public static func umount(mountPoint: String, paths: ToolPaths) -> Command {
-        Command(executable: paths.umount, arguments: [mountPoint])
+    /// `force` (`-f`) only for a read-only mount: nothing can be half-written there, while a plain umount fails when
+    /// Spotlight or Finder still has files open (`diskutil` would have asked them to let go first).
+    public static func umount(mountPoint: String, force: Bool = false, paths: ToolPaths) -> Command {
+        Command(executable: paths.umount, arguments: (force ? ["-f"] : []) + [mountPoint])
     }
 
     private static func backendPrefix(_ backend: MountBackend) -> String {

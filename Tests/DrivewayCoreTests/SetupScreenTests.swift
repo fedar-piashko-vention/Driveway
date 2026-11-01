@@ -184,11 +184,12 @@ struct SetupScreenTests {
     @Test func noSetupCopySuggestsLoweringSecurity() {
         var texts: [String] = [
             Copy.untrustedTapNote, Copy.moveToApplications, Copy.conflictWarning(driver: "Tuxera NTFS"),
-            Copy.notAvailableOnThisMac, Copy.noBackendReason,
+            Copy.notAvailableOnThisMac, Copy.noBackendReason, Copy.needsFullDiskAccess,
+            Copy.fullDiskAccessHint, Copy.fullDiskAccessSteps,
         ]
         let requirements: [Requirement] = [
             .homebrew, .macFUSE, .macFUSEUpdate(installed: SemanticVersion("5.3.0")!), .macFUSEApproval(.kernel),
-            .macFUSEApproval(.fskit), .ntfs3g, .ext4fuse, .e2fsprogs, .helper, .helperUpdate,
+            .macFUSEApproval(.fskit), .ntfs3g, .ext4fuse, .e2fsprogs, .helper, .helperUpdate, .fullDiskAccess,
         ]
         texts += requirements.map(Copy.requirementLabel)
         texts += requirements.compactMap(Copy.afterHandoff)

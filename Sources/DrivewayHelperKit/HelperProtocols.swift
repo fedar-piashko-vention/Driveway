@@ -21,6 +21,8 @@ public protocol DiskInventoryProviding: Sendable {
     /// The mount table's entry for a volume mounted from `device` (a FUSE mount's "from" name is the `fsname`
     /// Driveway sets): its mount point and filesystem type, e.g. "macfuse". Nil when nothing is mounted from it.
     func mountEntry(fromDevice device: String) -> MountEntry?
+    /// Whether the helper has Full Disk Access, which external drives' raw devices need; nil when it can't tell.
+    func fullDiskAccess() -> Bool?
 }
 
 public struct MountEntry: Equatable, Sendable {
@@ -35,6 +37,7 @@ public struct MountEntry: Equatable, Sendable {
 extension DiskInventoryProviding {
     public func mountIsReadOnly(_ mountPoint: String) -> Bool? { nil }
     public func mountEntry(fromDevice device: String) -> MountEntry? { nil }
+    public func fullDiskAccess() -> Bool? { nil }
 }
 
 public protocol BackendProbing: Sendable {

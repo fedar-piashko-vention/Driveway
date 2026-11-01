@@ -89,11 +89,29 @@ public final class DADiskInventory: DiskInventoryProviding, @unchecked Sendable 
         return names.sorted()
     }
 
-    public enum HeaderError: Error {
+    public enum HeaderError: Error, Equatable, CustomStringConvertible {
         case invalidName
         case openFailed(Int32)
         case readFailed(Int32)
+
+        /// macOS privacy protection refused the raw device: the helper has no Full Disk Access.
+        public var isPermissionDenied: Bool {
+            switch self {
+            case .openFailed(let e), .readFailed(let e): e == EPERM
+            case .invalidName: false
+            }
+        }
+
+        public var description: String {
+            switch self {
+            case .invalidName: "invalid BSD name"
+            case .openFailed(let e): "couldn't open the raw device: \(String(cString: strerror(e)))"
+            case .readFailed(let e): "couldn't read the raw device: \(String(cString: strerror(e)))"
+            }
+        }
     }
+
+    public func fullDiskAccess() -> Bool? { HelperEnvironment.fullDiskAccess() }
 
     /// The first 4096 bytes of `/dev/r<bsd>`, opened read-only. The name is checked first.
     public func header(of bsdName: String) async throws -> Data {

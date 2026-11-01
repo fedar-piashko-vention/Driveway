@@ -18,6 +18,17 @@ public enum HelperEnvironment {
         return build.isEmpty ? "unknown" : build
     }
 
+    /// Whether this process has Full Disk Access: opens `probePath` read-only and closes it at once. Without Full
+    /// Disk Access the open fails with EPERM, even as root. Nil when the result tells nothing (no such file).
+    public static func fullDiskAccess(probePath: String = FullDiskAccess.probePath) -> Bool? {
+        let fd = open(probePath, O_RDONLY)
+        if fd >= 0 {
+            close(fd)
+            return FullDiskAccess.status(openErrno: 0)
+        }
+        return FullDiskAccess.status(openErrno: errno)
+    }
+
     /// The user at the console, from `SCDynamicStoreCopyConsoleUser`.
     public static func consoleUser() -> ConsoleUser? {
         var uid: uid_t = 0

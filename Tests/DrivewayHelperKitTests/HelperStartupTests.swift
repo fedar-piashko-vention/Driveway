@@ -138,6 +138,7 @@ import Testing
     }
     #expect(volumes.first?.mountedBy == .driveway)
     #expect(volumes.first?.mountPoint == "/Volumes/LINUX")
+    #expect(volumes.first?.access == .readOnly)  // ext4fuse only reads, whatever the mount flags say
 }
 
 @Test func doesNotAdoptMacOSsOwnNTFSMount() async {

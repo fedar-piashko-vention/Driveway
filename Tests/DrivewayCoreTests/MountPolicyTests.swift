@@ -142,3 +142,51 @@ struct MountPolicyTests {
         #expect(try JSONDecoder().decode(DrivewaySettings.self, from: data) == s)
     }
 }
+
+struct LeaveReasonTests {
+    @Test func leaveReasonsFollowTheMountRules() {
+        let user = ConsoleUser(uid: 501, gid: 20)
+        let ready: [Feature: FeatureState] = [.readNTFS: .ready, .writeNTFS: .ready, .repairNTFS: .ready, .extDrives: .ready]
+        func reason(
+            _ fs: FilesystemKind, _ settings: DrivewaySettings = DrivewaySettings(),
+            _ features: [Feature: FeatureState]? = nil, user u: ConsoleUser? = user
+        ) -> LeaveReason? {
+            autoMountLeaveReason(
+                filesystem: fs, settingsKey: "K", settings: settings, features: features ?? ready, consoleUser: u)
+        }
+        #expect(reason(.ntfs) == nil)
+        #expect(reason(.ext4) == nil)
+        #expect(reason(.ntfs, user: nil) == .nobodyLoggedIn)
+        #expect(reason(.exfat) == .notDrivewayFilesystem(.exfat))
+        #expect(reason(.ntfs, DrivewaySettings(autoMountNTFS: false)) == .autoMountOff)
+        #expect(reason(.ntfs, DrivewaySettings(alwaysReadOnly: ["K"])) == .alwaysReadOnly)
+        var locked = ready
+        locked[.writeNTFS] = .locked(missing: [.fullDiskAccess])
+        #expect(reason(.ntfs, DrivewaySettings(), locked) == .featureNotReady(.writeNTFS, .locked(missing: [.fullDiskAccess])))
+        locked[.extDrives] = .notAvailableYet
+        #expect(reason(.ext4, DrivewaySettings(), locked) == .featureNotReady(.extDrives, .notAvailableYet))
+
+        #expect(LeaveReason.autoMountOff.description == "auto-mount is off")
+        #expect(LeaveReason.nobodyLoggedIn.description == "nobody is logged in")
+        #expect(LeaveReason.alwaysReadOnly.description == "the drive is set to always mount read-only")
+        #expect(
+            LeaveReason.featureNotReady(.writeNTFS, .locked(missing: [.fullDiskAccess])).description
+                == "writeNTFS is not ready (locked: fullDiskAccess)")
+    }
+
+    @Test func autoMountActionAgreesWithTheLeaveReason() {
+        let user = ConsoleUser(uid: 501, gid: 20)
+        let ready: [Feature: FeatureState] = [.readNTFS: .ready, .writeNTFS: .ready, .repairNTFS: .ready, .extDrives: .ready]
+        for fs in FilesystemKind.allCases {
+            for settings in [DrivewaySettings(), DrivewaySettings(autoMountNTFS: false), DrivewaySettings(alwaysReadOnly: ["K"])] {
+                for u in [user, nil] {
+                    let action = autoMountAction(
+                        filesystem: fs, mountedBy: .none, settingsKey: "K", settings: settings, features: ready, consoleUser: u)
+                    let reason = autoMountLeaveReason(
+                        filesystem: fs, settingsKey: "K", settings: settings, features: ready, consoleUser: u)
+                    #expect((action == .leaveToMacOS) == (reason != nil), "\(fs) \(settings) \(String(describing: u))")
+                }
+            }
+        }
+    }
+}

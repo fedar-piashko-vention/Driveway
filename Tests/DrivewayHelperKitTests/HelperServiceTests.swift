@@ -1369,3 +1369,27 @@ private func extMountedOutsideDA() async -> Harness {
     let response = await h.service.handle(.unmount(ref("disk6s1")), authorization: nil)
     guard case .error = response else { Issue.record("expected an error, got \(response)"); return }
 }
+
+@Test func busyReadOnlyMountIsForcedOff() async {
+    // Spotlight or Finder holds files on the ext drive: a plain umount fails, a forced one is safe on a read-only mount.
+    let h = await extMountedOutsideDA()
+    h.runner.script(tools.umount, "/Volumes/LINUX", exit: 1, stderr: "umount(/Volumes/LINUX): Resource busy -- try 'diskutil unmount'\n")
+    let inventory = h.inventory
+    h.runner.onRun { c in
+        if c.executable == tools.umount, c.arguments.first == "-f" { inventory.setStuck([]) }
+    }
+    #expect(await h.service.handle(.eject(ref("disk6s1")), authorization: nil) == .ok)
+    #expect(h.runner.commands.contains(cmd(tools.umount, "-f", "/Volumes/LINUX")))
+    #expect(h.runner.commands.contains(cmd(diskutil, "eject", "/dev/disk6")))
+}
+
+@Test func unmountFailureReportsUmountsReasonNotDiskutils() async {
+    let h = await extMountedOutsideDA()
+    h.runner.script(tools.umount, "/Volumes/LINUX", exit: 1, stderr: "Resource busy\n")
+    h.runner.script(tools.umount, "-f", exit: 1, stderr: "Resource busy\n")
+    h.runner.onRun { _ in }  // nothing removes the mount
+    let response = await h.service.handle(.unmount(ref("disk6s1")), authorization: nil)
+    guard case .error(.commandFailed(let message)) = response else { Issue.record("expected commandFailed, got \(response)"); return }
+    #expect(message.contains("Resource busy"))
+    #expect(!message.contains("already unmounted"))
+}

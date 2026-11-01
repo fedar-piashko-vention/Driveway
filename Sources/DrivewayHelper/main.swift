@@ -35,13 +35,16 @@ let trigger = Mutex<ReevaluationTrigger?>(nil)
     reevaluateIfNeeded()
 }
 
-/// Someone logged in, or NTFS writing / ext drives became ready: drives attached before that were left to macOS.
+/// Someone logged in, NTFS writing / ext drives became ready, or the helper was given Full Disk Access: drives
+/// attached before that were left to macOS. The Full Disk Access probe is one open() and close(), so it runs with
+/// the 5-second login check: a drive is taken over moments after the user allows the helper in System Settings.
 @Sendable func reevaluateIfNeeded() {
     let user = HelperEnvironment.consoleUser()
     let states = features.withLock { $0 }
-    guard trigger.withLock({ $0?.update(user: user, features: states) ?? false }) else { return }
+    let access = HelperEnvironment.fullDiskAccess()
+    guard trigger.withLock({ $0?.update(user: user, features: states, fullDiskAccess: access) ?? false }) else { return }
     Task {
-        logger.notice("Evaluating drives again: someone logged in or a feature became ready.")
+        logger.notice("Evaluating drives again: someone logged in, a feature became ready or Full Disk Access was granted.")
         for event in await service.reevaluateDrives() { listener.broadcast(event) }
     }
 }
@@ -86,8 +89,13 @@ Task {
     watcher.start(service: service)
     listener.start()
     let states = features.withLock { $0 }
-    trigger.withLock { $0 = ReevaluationTrigger(user: HelperEnvironment.consoleUser(), features: states) }
-    logger.notice("Driveway helper \(helperProtocolVersion, privacy: .public) started.")
+    let access = HelperEnvironment.fullDiskAccess()
+    trigger.withLock {
+        $0 = ReevaluationTrigger(user: HelperEnvironment.consoleUser(), features: states, fullDiskAccess: access)
+    }
+    let accessText = access.map { $0 ? "granted" : "missing: external drives stay with macOS" } ?? "unknown"
+    logger.notice(
+        "Driveway helper \(helperProtocolVersion, privacy: .public) started. Full Disk Access: \(accessText, privacy: .public).")
     while true {
         try? await Task.sleep(for: .seconds(300))
         await refreshFeatures()
