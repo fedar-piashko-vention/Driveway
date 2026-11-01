@@ -57,3 +57,15 @@ private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
     #expect(AuthorizationRights.modifyDisk == "app.driveway.helper.modify-disk")
     #expect(!helperProtocolVersion.isEmpty)
 }
+
+@Test func readOnlyReasonMapsToHealthAndError() {
+    let dirty = ReadOnlyReason.dirty.healthAndError
+    #expect(dirty.health == .dirty)
+    #expect(dirty.error == nil)
+    let hibernated = ReadOnlyReason.hibernated.healthAndError
+    #expect(hibernated.health == .hibernated)
+    #expect(hibernated.error == nil)
+    let failed = ReadOnlyReason.error("ntfs-3g not found").healthAndError
+    #expect(failed.health == .unknown)
+    #expect(failed.error == "ntfs-3g not found")
+}
