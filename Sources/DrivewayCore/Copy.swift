@@ -13,6 +13,12 @@ public enum Copy {
     public static let forOlderPCs = "for older PCs"
 
     public static func featuresReady(_ n: Int) -> String { "\(n) of 4 features ready" }
+
+    public static let fixAndMount = "Fix & mount read/write"
+    public static let handledByMacOS = "handled by macOS"
+    public static func mountedBy(_ driver: String) -> String { "Mounted by \(driver)" }
+    public static let autoMountNTFS = "Auto-mount NTFS read/write"
+    public static let alwaysMountReadOnly = "Always mount read-only"
 }
 
 /// What a user notification says and where clicking it goes. Built from core values so Core stays independent of IPC.
