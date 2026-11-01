@@ -1,5 +1,6 @@
 import AppKit
 import DrivewayCore
+import DrivewayIPC
 import SwiftUI
 
 /// Check, back up and repair a drive, with the last report. Repairs ask first; the forced one asks twice over.
@@ -15,6 +16,7 @@ struct CheckRepairTab: View {
     @State private var confirmation: Confirmation?
 
     private var isBusy: Bool { model.busy.contains(volume.bsdName) }
+    private var progress: OperationProgress? { model.progress[volume.bsdName] }
 
     var body: some View {
         Form {
@@ -34,7 +36,16 @@ struct CheckRepairTab: View {
                             Button(Self.title(action)) { start(action) }
                                 .disabled(isBusy)
                         }
-                        if isBusy { ProgressView().controlSize(.small) }
+                        // A spinner until (or unless) the tool reports how far it has got.
+                        if isBusy, progress == nil { ProgressView().controlSize(.small) }
+                    }
+                    if isBusy, let progress {
+                        ProgressView(value: progress.fraction) {
+                            Text(Self.title(progress.operation))
+                        } currentValueLabel: {
+                            Text(progress.fraction, format: .percent.precision(.fractionLength(0)))
+                                .monospacedDigit()
+                        }
                     }
                     if volume.filesystem.isDrivewayManaged {
                         Text("Check and Repair unmount the drive while they run.")
@@ -84,6 +95,14 @@ struct CheckRepairTab: View {
         case .check: "Check"
         case .repair: "Repair"
         case .repairForce: "Repair (force)"
+        }
+    }
+
+    private static func title(_ operation: ProgressOperation) -> String {
+        switch operation {
+        case .check: "Checking…"
+        case .repair: "Repairing…"
+        case .backup: "Backing up…"
         }
     }
 

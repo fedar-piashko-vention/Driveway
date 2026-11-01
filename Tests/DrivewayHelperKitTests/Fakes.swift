@@ -13,6 +13,7 @@ final class FakeRunner: CommandRunning {
         var errors: [String: any Error & Sendable] = [:]
         var onRun: (@Sendable (Command) -> Void)?
         var gates: [String: Gate] = [:]
+        var lines: [String: [String]] = [:]
     }
     private let state = Mutex(State())
 
@@ -26,6 +27,11 @@ final class FakeRunner: CommandRunning {
         state.withLock {
             $0.results[Self.key(executable, firstArgument)] = CommandResult(exitCode: exit, stdout: stdout, stderr: stderr)
         }
+    }
+
+    /// Lines the command streams to an output-line callback before it finishes.
+    func stream(_ executable: String, _ firstArgument: String, lines: [String]) {
+        state.withLock { $0.lines[Self.key(executable, firstArgument)] = lines }
     }
 
     func fail(_ executable: String, _ firstArgument: String, with error: any Error & Sendable) {
@@ -58,6 +64,12 @@ final class FakeRunner: CommandRunning {
         if let error { throw error }
         return result ?? CommandResult(exitCode: 0, stdout: "", stderr: "")
     }
+
+    func run(_ c: Command, onOutputLine: @escaping @Sendable (String) -> Void) async throws -> CommandResult {
+        let lines = state.withLock { $0.lines[Self.key(c.executable, c.arguments.first)] ?? [] }
+        for line in lines { onOutputLine(line) }
+        return try await run(c)
+    }
 }
 
 /// The runner the service uses for commands without a time limit. Passes every command on to `base`, so
@@ -70,6 +82,10 @@ final class UnboundedRunner: CommandRunning {
     func run(_ c: Command) async throws -> CommandResult {
         state.withLock { $0.append(c) }
         return try await base.run(c)
+    }
+    func run(_ c: Command, onOutputLine: @escaping @Sendable (String) -> Void) async throws -> CommandResult {
+        state.withLock { $0.append(c) }
+        return try await base.run(c, onOutputLine: onOutputLine)
     }
 }
 
@@ -268,6 +284,8 @@ struct Harness {
     let inventory: FakeInventory
     let settings: MemorySettings
     let logs: Box<[String]>
+    /// The `.progress` events the service sent.
+    let progress: Box<[VolumeEvent]>
 }
 
 func makeHarness(
@@ -284,12 +302,16 @@ func makeHarness(
     let inventory = FakeInventory(disks: disks, headers: headers, boot: boot, mounted: mounted)
     let store = MemorySettings(settings, failSaves: failSaves)
     let logs = Box<[String]>([])
+    let progress = Box<[VolumeEvent]>([])
     let service = HelperService(
         runner: runner, unboundedRunner: unbounded, auth: authVerifier ?? FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
         backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console },
         features: featuresProvider ?? { features }, backendChecked: backendChecked,
+        progress: { event in progress.value.append(event) },
         log: { line in logs.value.append(line) })
-    return Harness(service: service, runner: runner, unbounded: unbounded, inventory: inventory, settings: store, logs: logs)
+    return Harness(
+        service: service, runner: runner, unbounded: unbounded, inventory: inventory, settings: store, logs: logs,
+        progress: progress)
 }
 
 func cmd(_ executable: String, _ args: String...) -> Command { Command(executable: executable, arguments: args) }

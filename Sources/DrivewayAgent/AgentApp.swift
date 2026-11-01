@@ -44,7 +44,7 @@ final class Agent {
             Task { await notifier.post(content) }
         case .backedOff(let volume, let driver):
             announceOnce(driver: driver, content: .backedOff(label: volume.label, driver: driver))
-        case .mounted, .removed:
+        case .mounted, .removed, .progress:
             break
         }
     }
