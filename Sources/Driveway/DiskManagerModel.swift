@@ -14,6 +14,12 @@ struct FormatInProgress: Equatable {
     var description: String
 }
 
+/// How far a running check, repair or backup has got, as its tool last reported.
+struct OperationProgress: Equatable {
+    var operation: ProgressOperation
+    var fraction: Double
+}
+
 /// The Disk Manager's state: the helper's volume list kept current by its events, the selected drive and the
 /// settings. Every helper error ends up in `errorMessage`, which the window shows as an alert.
 @MainActor
@@ -29,6 +35,8 @@ final class DiskManagerModel {
     private(set) var settingsLoaded = false
     /// Drives with an operation (eject, fix & mount, check, repair, back up) in flight.
     private(set) var busy: Set<String> = []
+    /// The latest progress of the operation in flight, per drive. Only for busy drives whose tool reports progress.
+    private(set) var progress: [String: OperationProgress] = [:]
     /// The latest check or repair report per drive, by BSD name.
     private(set) var reports: [String: CheckReport] = [:]
     /// Where the latest backup of each drive was saved, by BSD name.
@@ -93,6 +101,12 @@ final class DiskManagerModel {
     }
 
     func apply(_ e: VolumeEvent) {
+        // Progress changes no drive, so it mustn't make a refresh in flight look stale. One that arrives after the
+        // operation's reply is dropped, or the bar would come back.
+        if case .progress(let bsdName, let operation, let fraction) = e {
+            if busy.contains(bsdName) { progress[bsdName] = OperationProgress(operation: operation, fraction: fraction) }
+            return
+        }
         gate.eventApplied()
         helperReachable = true
         volumes = e.applied(to: volumes)
@@ -244,7 +258,10 @@ final class DiskManagerModel {
     @discardableResult
     private func operate(on volume: Volume, _ request: HelperRequest, authorized: Bool) async -> Operation {
         guard busy.insert(volume.bsdName).inserted else { return .notRun }
-        defer { busy.remove(volume.bsdName) }
+        defer {
+            busy.remove(volume.bsdName)
+            progress[volume.bsdName] = nil
+        }
         switch await send(request, authorized: authorized) {
         case .notSent:
             return .notRun

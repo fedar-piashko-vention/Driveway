@@ -159,6 +159,24 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     #expect(v.backend == .fskit)
 }
 
+@Test func macOSNeverMountsWhatDrivewaysExtProbeRecognised() async {
+    // Driveway's probe bundle gives DiskArbitration this kind; macOS has no ext driver, so its mount can only fail.
+    let d = disk("disk6s1", kind: ExtProbe.volumeKind, content: "Linux Filesystem", name: "LINUX")
+    let notReady: [Feature: FeatureState] = [.readNTFS: .ready, .writeNTFS: .ready, .extDrives: .notAvailableYet]
+    let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header], features: notReady)
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)
+    #expect(!h.service.shouldApproveMacOSMount(d))
+    // Driveway leaves the drive alone without asking macOS to mount it.
+    #expect(await h.service.diskAppeared(d) == nil)
+    #expect(h.runner.commands.isEmpty)
+    #expect(!h.service.shouldApproveMacOSMount(d))
+
+    // Even with no console user, before the boot disk is known or the backend checked.
+    let early = makeHarness(disks: [d], console: nil)
+    #expect(!early.service.shouldApproveMacOSMount(d))
+}
+
 @Test func fskitMountMustAppear() async {
     let d = disk("disk4s1", name: "BACKUP")
     let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], probe: .fskit, mounted: false)
@@ -383,7 +401,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     #expect(plain.succeeded)  // exit 0: clean
     #expect(plain.summary == "No problems found.")
     let forced = await h.service.handle(.repair(ref("disk6s1"), force: true), authorization: auth)
-    #expect(h.runner.commands == [cmd(tools.e2fsck, "-p", "-f", "/dev/disk6s1"), cmd(tools.e2fsck, "-y", "-f", "/dev/disk6s1")])
+    #expect(h.runner.commands == [cmd(tools.e2fsck, "-p", "-f", "-C", "1", "/dev/disk6s1"), cmd(tools.e2fsck, "-y", "-f", "-C", "1", "/dev/disk6s1")])
     guard case .report(let r) = forced else { Issue.record("expected report"); return }
     #expect(r.mode == .repairForce)
     #expect(r.succeeded)  // exit 1: errors corrected
@@ -409,6 +427,38 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
         cmd(tools.ntfsclone, "--save-image", "--force", "--overwrite", "/Users/x/b.img", "/dev/disk4s1"),
         cmd(tools.chown, "-h", "501:20", "/Users/x/b.img"),
     ])
+}
+
+@Test func backupSendsThrottledProgress() async {
+    let h = makeHarness(disks: [disk("disk4s1", name: "BACKUP")], headers: ["disk4s1": ntfsHeader])
+    h.runner.stream(tools.ntfsclone, "--save-image", lines: [
+        "Scanning volume ...", "  0.00 percent completed", "100.00 percent completed", "Saving NTFS to image ...",
+        " 10.00 percent completed", " 50.00 percent completed", "100.00 percent completed", "Syncing ...",
+    ])
+    #expect(await h.service.handle(.backup(ref("disk4s1"), imagePath: "/Users/x/b.img"), authorization: auth) == .ok)
+    // The lines arrive at once: the throttle lets through the first and the end only.
+    #expect(h.progress.value == [
+        .progress(bsdName: "disk4s1", operation: .backup, fraction: 0),
+        .progress(bsdName: "disk4s1", operation: .backup, fraction: 1),
+    ])
+}
+
+@Test func extCheckSendsProgressAndKeepsItOutOfTheReport() async {
+    let d = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
+    let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header])
+    h.runner.stream(tools.e2fsck, "-n", lines: ["1 0 16 LINUX", "5 32 32 LINUX"])
+    h.runner.script(tools.e2fsck, "-n", exit: 0, stdout: "Pass 1: Checking inodes\n1 0 16 LINUX\n5 32 32 LINUX\nLINUX: 14/131072 files\n")
+    let response = await h.service.handle(.check(ref("disk6s1")), authorization: nil)
+    guard case .report(let r) = response else { Issue.record("expected report, got \(response)"); return }
+    #expect(r.rawOutput == "Pass 1: Checking inodes\nLINUX: 14/131072 files\n")
+    #expect(h.progress.value == [
+        .progress(bsdName: "disk6s1", operation: .check, fraction: 0),
+        .progress(bsdName: "disk6s1", operation: .check, fraction: 1),
+    ])
+
+    h.runner.stream(tools.e2fsck, "-p", lines: ["2 3 6 LINUX"])
+    _ = await h.service.handle(.repair(ref("disk6s1"), force: false), authorization: auth)
+    #expect(h.progress.value.last == .progress(bsdName: "disk6s1", operation: .repair, fraction: 0.8))
 }
 
 // MARK: - Format
@@ -904,7 +954,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
 
     let e = makeHarness(disks: [disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")], headers: ["disk6s1": ext4Header])
     _ = await e.service.handle(.check(ref("disk6s1")), authorization: nil)
-    #expect(e.unbounded.commands == [cmd(ToolPaths().e2fsck, "-n", "-f", "/dev/disk6s1")])
+    #expect(e.unbounded.commands == [cmd(ToolPaths().e2fsck, "-n", "-f", "-C", "1", "/dev/disk6s1")])
 
     let x = makeHarness(disks: [disk("disk5s1", kind: "exfat", name: "STICK", path: "/Volumes/STICK")])
     _ = await x.service.handle(.repair(ref("disk5s1"), force: false), authorization: auth)

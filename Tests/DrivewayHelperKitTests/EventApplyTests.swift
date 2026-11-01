@@ -28,6 +28,13 @@ struct EventApplyTests {
         #expect(VolumeEvent.removed(bsdName: "disk9s1").applied(to: [a, b]) == [a, b])
     }
 
+    @Test func progressLeavesTheListAndSelectionAlone() {
+        let a = volume("disk4s1")
+        let event = VolumeEvent.progress(bsdName: "disk4s1", operation: .backup, fraction: 0.5)
+        #expect(event.applied(to: [a]) == [a])
+        #expect(event.selection(after: "disk4s1") == "disk4s1")
+    }
+
     @Test func mountedReadOnlyReplaces() {
         let a = volume("disk4s1")
         var readOnly = a

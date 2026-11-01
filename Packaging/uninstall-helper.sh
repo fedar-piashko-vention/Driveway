@@ -43,6 +43,7 @@ main() {
     rm -f /Library/LaunchDaemons/app.driveway.helper.plist
     rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app
     rm -f /Library/PrivilegedHelperTools/app.driveway.helper
+    rm -rf /Library/Filesystems/driveway_ext.fs /Library/Filesystems/driveway_ext.fs.new
     rm -rf /Library/Logs/Driveway
 
     # Hand the app bundle back to the logged-in user.
