@@ -7,7 +7,7 @@ import Testing
 private let auth = Data([1, 2, 3])
 private let ntfs3g = tools.ntfs3g
 private let unmount4s1 = cmd(diskutil, "unmount", "/dev/disk4s1")
-private let ntfs3gBackup = cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover")
+private let ntfs3gBackup = cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover,user_xattr")
 private let ntfsfixOK = """
     Mounting volume... OK
     Processing of $MFT and $MFTMirr completed successfully.
@@ -144,7 +144,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     let ntfs = disk("disk5s1", kind: "ntfs", name: "BACKUP")
     let h2 = makeHarness(disks: [ntfs])
     let event = await h2.service.diskAppeared(ntfs)
-    #expect(h2.runner.commands == [cmd(ntfs3g, "/dev/disk5s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover")])
+    #expect(h2.runner.commands == [cmd(ntfs3g, "/dev/disk5s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover,user_xattr")])
     if case .mounted = event {} else { Issue.record("expected .mounted") }
 }
 
@@ -166,7 +166,7 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     guard case .mountFailed(let v, _) = event else { Issue.record("expected .mountFailed, got \(String(describing: event))"); return }
     #expect(v.bsdName == "disk4s1")
     #expect(h.runner.commands == [
-        cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover"),
+        cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "backend=fskit,volname=BACKUP,uid=501,gid=20,norecover,user_xattr"),
         cmd(diskutil, "mount", "/dev/disk4s1"),
     ])
     #expect(h.settings.current.fskitFailedOnOSBuild == osBuild)
@@ -441,7 +441,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
         cmd(diskutil, "eraseDisk", "ExFAT", "DRIVEWAYTMP", "GPT", "/dev/disk4"),
         cmd(diskutil, "unmount", "/dev/disk4s2"),
         cmd(tools.mkntfs, "--quick", "--label", "NEW", "/dev/disk4s2"),
-        cmd(ntfs3g, "/dev/disk4s2", "/Volumes/NEW", "-o", "volname=NEW,uid=501,gid=20,norecover"),
+        cmd(ntfs3g, "/dev/disk4s2", "/Volumes/NEW", "-o", "volname=NEW,uid=501,gid=20,norecover,user_xattr"),
     ])
     let v = mountedVolume(response)
     #expect(v?.label == "NEW")
@@ -553,7 +553,7 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     let (event, response) = await (appeared, unmounted)
     if case .mounted = event {} else { Issue.record("expected .mounted, got \(String(describing: event))") }
     #expect(response == .ok)
-    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover"), unmount4s1])
+    #expect(h.runner.commands == [cmd(ntfs3g, "/dev/disk4s1", "/Volumes/BACKUP", "-o", "volname=BACKUP,uid=501,gid=20,norecover,user_xattr"), unmount4s1])
 }
 
 @Test func formatClearsStaleDetectionSoMacOSCanMountDuringErase() async {
@@ -688,8 +688,9 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     guard case .mountFailed = await h.service.diskAppeared(d) else { Issue.record("expected .mountFailed"); return }
     #expect(h.settings.current.fskitFailedOnOSBuild == nil)  // the save failed
     #expect(await h.service.handle(.backendStatus, authorization: nil) == .backend(.unavailable))
-    #expect(h.logs.value.count == 1)
-    #expect(h.logs.value.first?.contains(osBuild) == true)
+    // The failed save is logged (next to the mount failure itself).
+    #expect(h.logs.value.filter { $0.contains(osBuild) }.count == 1)
+    #expect(h.logs.value.contains { $0.hasPrefix("Couldn't mount disk4s1") })
 }
 
 @Test func inventoryNamesAreCheckedBeforeDevPaths() async {
@@ -1248,4 +1249,73 @@ private let efi4 = disk("disk4s1", kind: "msdos", content: "EFI", name: "EFI", s
     #expect(v.mountedBy == .driveway)
     #expect(v.access == .readOnly)
     #expect(!h.runner.commands.contains(cmd(diskutil, "mount", "/dev/disk4s1")))
+}
+
+@Test func authorizationIsCheckedBeforeWaitingForABusyDisk() async {
+    // The administrator's credential lasts only the right's timeout; a request queued behind a long operation must
+    // not fail as "not authorized" because it was checked after the wait.
+    let d = disk("disk4s1", name: "BACKUP")
+    let auth = ExpiringAuth()
+    let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], authVerifier: auth)
+    let gate = h.runner.hold(ntfs3g, "/dev/disk4s1")
+    let service = h.service
+    async let appeared = service.diskAppeared(d)
+    await gate.reached.wait()
+    async let fixed = service.handle(.fixAndMount(ref("disk4s1")), authorization: Data(count: 32))
+    for _ in 0..<200 { await Task.yield() }
+    auth.expire()  // the credential runs out while the request waits for the disk
+    gate.open()
+    let (_, response) = await (appeared, fixed)
+    #expect(response != .error(.notAuthorized))
+}
+
+// MARK: - Live session: FUSE mounts DiskArbitration doesn't know (ext)
+
+/// An ext drive Driveway mounted, which DiskArbitration doesn't tie to the disk: `diskutil unmount` answers
+/// "already unmounted" while the mount stays, until `umount` on the mount point removes it.
+private func extMountedOutsideDA() async -> Harness {
+    let d = disk("disk6s1", kind: nil, content: "Linux Filesystem", name: "LINUX")
+    let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header])
+    _ = await h.service.diskAppeared(d)
+    h.runner.script(diskutil, "unmount", exit: 1, stderr: "disk6s1 was already unmounted\n")
+    h.inventory.setStuck(["/Volumes/LINUX"])
+    let inventory = h.inventory
+    h.runner.onRun { c in
+        if c.executable == tools.umount { inventory.setStuck([]) }
+    }
+    return h
+}
+
+@Test func extCheckUnmountsAMountDiskArbitrationDoesNotKnow() async {
+    let h = await extMountedOutsideDA()
+    let response = await h.service.handle(.check(ref("disk6s1")), authorization: nil)
+    guard case .report(let r) = response else { Issue.record("expected a report, got \(response)"); return }
+    #expect(r.filesystem == .ext4)
+    let commands = h.runner.commands
+    let umount = commands.firstIndex(of: cmd(tools.umount, "/Volumes/LINUX"))
+    let fsck = commands.firstIndex(where: { $0.executable == tools.e2fsck })
+    #expect(umount != nil && fsck != nil && umount! < fsck!)
+}
+
+@Test func extEjectUnmountsDrivewaysMountBeforeEjectingTheDisk() async {
+    let h = await extMountedOutsideDA()
+    let response = await h.service.handle(.eject(ref("disk6s1")), authorization: nil)
+    #expect(response == .ok)
+    let commands = h.runner.commands
+    let umount = commands.firstIndex(of: cmd(tools.umount, "/Volumes/LINUX"))
+    let eject = commands.firstIndex(of: cmd(diskutil, "eject", "/dev/disk6"))
+    #expect(umount != nil && eject != nil && umount! < eject!)
+}
+
+@Test func extUnmountFallsBackToUmount() async {
+    let h = await extMountedOutsideDA()
+    #expect(await h.service.handle(.unmount(ref("disk6s1")), authorization: nil) == .ok)
+    #expect(h.runner.commands.contains(cmd(tools.umount, "/Volumes/LINUX")))
+}
+
+@Test func unmountThatLeavesTheMountInPlaceIsAnError() async {
+    let h = await extMountedOutsideDA()
+    h.runner.onRun { _ in }  // umount doesn't remove it either
+    let response = await h.service.handle(.unmount(ref("disk6s1")), authorization: nil)
+    guard case .error = response else { Issue.record("expected an error, got \(response)"); return }
 }

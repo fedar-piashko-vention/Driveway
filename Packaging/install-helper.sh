@@ -17,13 +17,16 @@ check_app_paths() {
         return 64
     fi
     for d in "${app}/Contents" "${app}/Contents/Library" \
-             "${app}/Contents/Library/LaunchServices" "${app}/Contents/Resources"; do
+             "${app}/Contents/Library/LaunchServices" "${app}/Contents/Resources" \
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app" \
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents" \
+             "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS"; do
         if [[ ! -d "${d}" || -L "${d}" ]]; then
             echo "${d} is missing or a symlink." >&2
             return 64
         fi
     done
-    for d in "${app}/Contents/Library/LaunchServices/app.driveway.helper" \
+    for d in "${app}/Contents/Library/LaunchServices/app.driveway.helper.app/Contents/MacOS/app.driveway.helper" \
              "${app}/Contents/Resources/app.driveway.helper.plist" \
              "${app}/Contents/Resources/app.driveway.agent.plist"; do
         if [[ ! -f "${d}" || -L "${d}" ]]; then
@@ -46,9 +49,12 @@ main() {
     fi
     check_app_paths "${APP}" || exit 64
 
-    local HELPER_SRC="${APP}/Contents/Library/LaunchServices/app.driveway.helper"
+    local HELPER_SRC="${APP}/Contents/Library/LaunchServices/app.driveway.helper.app"
     local RES="${APP}/Contents/Resources"
-    local HELPER_DST="/Library/PrivilegedHelperTools/app.driveway.helper"
+    # A small app bundle, so Login Items shows "Driveway" with its icon. It stays out of /Applications: there an
+    # admin could swap it without a password, and launchd runs it as root.
+    local HELPER_DST="/Library/PrivilegedHelperTools/app.driveway.helper.app"
+    local OLD_HELPER="/Library/PrivilegedHelperTools/app.driveway.helper"
     local DAEMON_PLIST="/Library/LaunchDaemons/app.driveway.helper.plist"
     local AGENT_PLIST="/Library/LaunchAgents/app.driveway.agent.plist"
     local LOG_DIR="/Library/Logs/Driveway"
@@ -59,7 +65,7 @@ main() {
     chown -R root:wheel "${APP}"
     find "${APP}" ! -type l -exec chmod -N {} +
     chmod -R go-w "${APP}"
-    if [[ "$(stat -f %u "${HELPER_SRC}")" != "0" ]]; then
+    if [[ "$(stat -f %u "${HELPER_SRC}/Contents/MacOS/app.driveway.helper")" != "0" ]]; then
         echo "${HELPER_SRC} is not root-owned after chown; aborting." >&2
         exit 1
     fi
@@ -74,7 +80,11 @@ main() {
 
     install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools
     install -d -o root -g wheel -m 755 "${LOG_DIR}"
-    install -S -o root -g wheel -m 755 "${HELPER_SRC}" "${HELPER_DST}"
+    rm -rf "${HELPER_DST}.new" "${HELPER_DST}" "${OLD_HELPER}"
+    ditto "${HELPER_SRC}" "${HELPER_DST}.new"
+    chown -R root:wheel "${HELPER_DST}.new"
+    chmod -R go-w "${HELPER_DST}.new"
+    mv "${HELPER_DST}.new" "${HELPER_DST}"
     install -S -o root -g wheel -m 644 "${RES}/app.driveway.helper.plist" "${DAEMON_PLIST}"
     install -S -o root -g wheel -m 644 "${RES}/app.driveway.agent.plist" "${AGENT_PLIST}"
 

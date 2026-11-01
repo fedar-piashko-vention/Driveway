@@ -4,7 +4,7 @@ import Testing
 
 @Test func modifyDiskRightDefinition() {
     let d = ModifyDiskRight.definition
-    #expect(d["timeout"] as? Int == 0)
+    #expect(d["timeout"] as? Int == 60)
     #expect(d["shared"] as? Bool == false)
     #expect(d["group"] as? String == "admin")
     #expect(ModifyDiskRight.isCurrent(d))

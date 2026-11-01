@@ -62,6 +62,19 @@ The `gromgit/fuse` tap prints "not trusted" warnings on install. The formulas st
 
 Final option list: kernel `volname=<label>,uid=<uid>,gid=<gid>[,ro]`; FSKit `backend=fskit,` + the same.
 
+**Live session, 2026-10-31 (kernel backend, ntfs-3g 2026.9.28):** without an xattr option, every extended attribute is refused (`Errno 102`, ENOTSUP), and so are ACLs. Finder, `cp -p` and `ditto` all copy extended attributes, so a Finder copy onto the drive failed with error 100102 and left a 0-byte file. Results with each option:
+
+| Option added | Finder copy |
+|---|---|
+| none | fails |
+| `user_xattr` | **works** (attributes become NTFS named streams, no `._` files) |
+| `streams_interface=xattr` | fails, though the man page calls it the same as `user_xattr` |
+| `auto_xattr` (macFUSE) | works, but writes `._` AppleDouble files |
+| `local` | fails |
+| `noappledouble` | fails |
+
+Driveway's ntfs-3g options are now `volname=<label>,uid=<uid>,gid=<gid>,norecover,user_xattr[,ro]`.
+
 ## Speed
 
 Measured on a disk image only. The real USB 3 SSD comparison (spike Step 8) is carried over to the release check.

@@ -41,6 +41,7 @@ main() {
 
     rm -f /Library/LaunchAgents/app.driveway.agent.plist
     rm -f /Library/LaunchDaemons/app.driveway.helper.plist
+    rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app
     rm -f /Library/PrivilegedHelperTools/app.driveway.helper
     rm -rf /Library/Logs/Driveway
 

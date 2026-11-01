@@ -81,6 +81,15 @@ struct FakeAuth: AuthorizationVerifying {
     }
 }
 
+/// An administrator's credential that runs out: valid until `expire()`, like the right's timeout.
+final class ExpiringAuth: AuthorizationVerifying, Sendable {
+    private let expired = Mutex(false)
+    func expire() { expired.withLock { $0 = true } }
+    func verify(_ externalForm: Data?, right: String) -> Bool {
+        !expired.withLock { $0 } && right == AuthorizationRights.modifyDisk
+    }
+}
+
 final class FakeInventory: DiskInventoryProviding {
     private struct State {
         var disks: [DiskDescription]
@@ -92,6 +101,8 @@ final class FakeInventory: DiskInventoryProviding {
         var readOnlyMounts: Set<String> = []
         /// Devices and mount points that stay in the mount table whatever is unmounted.
         var stuck: Set<String> = []
+        /// Mount table entries by device ("/dev/disk4s1").
+        var entries: [String: MountEntry] = [:]
     }
     private let state: Mutex<State>
 
@@ -104,6 +115,8 @@ final class FakeInventory: DiskInventoryProviding {
     func setMounted(_ mounted: Bool) { state.withLock { $0.mounted = mounted } }
     func setReadOnlyMounts(_ paths: Set<String>) { state.withLock { $0.readOnlyMounts = paths } }
     func setStuck(_ entries: Set<String>) { state.withLock { $0.stuck = entries } }
+    func setMountEntry(_ entry: MountEntry?, device: String) { state.withLock { $0.entries[device] = entry } }
+    func mountEntry(fromDevice device: String) -> MountEntry? { state.withLock { $0.entries[device] } }
     var headerReads: [String] { state.withLock { $0.headerReads } }
     var mountChecks: [String] { state.withLock { $0.mountChecks } }
 
@@ -263,7 +276,8 @@ func makeHarness(
     features: [Feature: FeatureState] = allReady, boot: Set<String> = ["disk0"], mounted: Bool = true,
     consoleProvider: (@Sendable () -> ConsoleUser?)? = nil, failSaves: Bool = false,
     featuresProvider: (@Sendable () -> [Feature: FeatureState])? = nil,
-    backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in }
+    backendChecked: @escaping @Sendable (BackendAvailability) -> Void = { _ in },
+    authVerifier: (any AuthorizationVerifying)? = nil
 ) -> Harness {
     let runner = FakeRunner()
     let unbounded = UnboundedRunner(base: runner)
@@ -271,7 +285,7 @@ func makeHarness(
     let store = MemorySettings(settings, failSaves: failSaves)
     let logs = Box<[String]>([])
     let service = HelperService(
-        runner: runner, unboundedRunner: unbounded, auth: FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
+        runner: runner, unboundedRunner: unbounded, auth: authVerifier ?? FakeAuth(valid: auth), inventory: inventory, settings: store, paths: tools,
         backendProbe: probe, osBuild: osBuild, consoleUser: consoleProvider ?? { console },
         features: featuresProvider ?? { features }, backendChecked: backendChecked,
         log: { line in logs.value.append(line) })
