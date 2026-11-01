@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fedar-piashko-vention/Driveway/releases/latest"><b>Download the latest version</b></a>
+  <a href="#install"><b>Install guide</b></a>
   ·
-  <a href="#install">Install guide</a>
+  <a href="https://github.com/fedar-piashko-vention/Driveway/releases/latest">Latest release</a>
   ·
   <a href="#questions-and-problems">Questions and problems</a>
 </p>
@@ -109,29 +109,40 @@ At the end, Homebrew shows **Next steps** with a few more commands to copy. Driv
 
 You can close Terminal now.
 
-### Step 3. Download Driveway
+### Step 3. Install Driveway
+
+1. Open **Terminal** again.
+2. Copy this whole line, paste it into Terminal and press Return:
+
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/fedar-piashko-vention/Driveway/main/scripts/install.sh)"
+   ```
+
+3. It downloads the latest version of Driveway, puts it in your **Applications** folder and opens it. If it asks for your **Password**, type the password you use to log in to your Mac and press Return.
+
+Driveway opens with the Setup screen. To update Driveway later, run the same line again.
+
+> [!NOTE]
+> Why Terminal and not a normal download? Driveway is not signed with a paid Apple developer certificate. If you download it in a web browser, macOS says the app "is damaged and can't be opened", and offers no way to open it anyway. A file downloaded in Terminal doesn't get that check. The app isn't damaged: the warning is about how it's signed, not about what it does. All of Driveway's source code, including [the install script](scripts/install.sh), is in this repository for anyone to read. Whether to trust it is your choice.
+
+<details>
+<summary>Prefer to download it yourself?</summary>
 
 1. Go to the [latest release](https://github.com/fedar-piashko-vention/Driveway/releases/latest) and click `Driveway-<version>.dmg` under **Assets** to download it.
-2. Open the downloaded file. A window opens with Driveway and an **Applications** folder.
-3. Drag **Driveway** onto **Applications**.
+2. Open the downloaded file and drag **Driveway** onto **Applications**.
+3. Open **Terminal**, paste this line and press Return. It tells macOS that you trust this copy of Driveway:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Driveway.app
+   ```
+
+4. Open Driveway from **Applications**.
+
+</details>
 
 Driveway has to run from the Applications folder. If you open it from anywhere else, it asks you to move it first.
 
-### Step 4. Open Driveway for the first time
-
-Driveway is not signed with a paid Apple developer certificate, so macOS stops it the first time. You allow it once:
-
-1. Open **Applications** and double-click **Driveway**. macOS says it can't verify that Driveway is free of malware. Click **Done**. Don't click **Move to Trash**.
-2. Open **System Settings** (Apple menu  > **System Settings**), click **Privacy & Security** in the sidebar, and scroll down to **Security**.
-3. You'll see "Driveway" was blocked to protect your Mac. Click **Open Anyway**.
-4. Enter your password or use Touch ID, then click **Open Anyway** once more.
-
-Driveway opens with the Setup screen.
-
-> [!NOTE]
-> This warning is about how the app is signed, not about what it does. All of Driveway's source code is in this repository for anyone to read. Whether to trust it is your choice.
-
-### Step 5. Run Setup
+### Step 4. Run Setup
 
 <p align="center">
   <img src="docs/images/setup.png" width="560" alt="Driveway's Setup screen">
@@ -153,7 +164,7 @@ Setup lists four features: **Read NTFS drives**, **Write to NTFS drives**, **Che
 
 When everything is done, Setup shows **Ready** next to each feature your Mac supports. On a Mac where saving to NTFS isn't possible yet (see [What works on your Mac](#what-works-on-your-mac)), **Write to NTFS drives** shows **Not available on this Mac yet**. That's expected.
 
-### Step 6. Plug in a drive
+### Step 5. Plug in a drive
 
 Plug in an NTFS drive. Within a few seconds it appears on the desktop and in Finder's sidebar, ready to use. Open Driveway to see it in the Disk Manager.
 
@@ -217,11 +228,15 @@ Open Driveway and select the drive. The **Info** tab says why. The most common r
 
 ### Driveway asks for Full Disk Access again
 
-macOS sometimes forgets the permission after Driveway updates, because the app isn't signed with a paid developer certificate. Setup then shows the Full Disk Access step again. In **System Settings > Privacy & Security > Full Disk Access**, select **Driveway**, click **−** to remove it, then add it again with **+** as in [Step 5](#step-5-run-setup).
+macOS sometimes forgets the permission after Driveway updates, because the app isn't signed with a paid developer certificate. Setup then shows the Full Disk Access step again. In **System Settings > Privacy & Security > Full Disk Access**, select **Driveway**, click **−** to remove it, then add it again with **+** as in [Step 4](#step-4-run-setup).
 
-### macOS says Driveway "can't be opened" or "is damaged"
+### macOS says Driveway "is damaged and can't be opened"
 
-Make sure you downloaded Driveway from this project's [Releases](https://github.com/fedar-piashko-vention/Driveway/releases) page, then follow [Step 4](#step-4-open-driveway-for-the-first-time). If you see "damaged", delete the app and download it again.
+You downloaded Driveway in a web browser. The app isn't damaged: macOS says this about apps that aren't signed with a paid Apple developer certificate. Click **Cancel**, not **Move to Bin**, then install Driveway with the Terminal line in [Step 3](#step-3-install-driveway). Or, if Driveway is already in Applications, paste this into Terminal and press Return:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Driveway.app
+```
 
 ### How fast is it?
 
