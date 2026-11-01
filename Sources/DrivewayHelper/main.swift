@@ -58,7 +58,14 @@ let service = HelperService(
     features: { features.withLock { $0 } },
     // Setup asks for the backend after every step: refresh the features then, not 5 minutes later.
     backendChecked: { updateFeatures(backend: $0) },
+    progress: { broadcast($0) },
     log: { logger.notice("\($0, privacy: .public)") })
+
+/// Sends an event to every connected app and agent. A function, so the service can be handed it before the
+/// listener exists.
+@Sendable func broadcast(_ event: VolumeEvent) {
+    listener.broadcast(event)
+}
 
 let listener = HelperListener(service: service, logger: logger)
 

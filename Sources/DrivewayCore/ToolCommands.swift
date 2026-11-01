@@ -61,7 +61,8 @@ public enum ToolCommands {
         Command(executable: paths.chown, arguments: ["-h", "\(uid):\(gid)", path])
     }
 
-    /// `.check` is `-n -f`, `.repair` is `-p -f`, `.repairForce` is `-y -f`.
+    /// `.check` is `-n -f`, `.repair` is `-p -f`, `.repairForce` is `-y -f`. `-C 1` adds `pass current max device`
+    /// progress lines to stdout (see `E2fsckProgress`).
     public static func e2fsck(device: String, mode: CheckMode, paths: ToolPaths) -> Command {
         let flag: String
         switch mode {
@@ -69,7 +70,7 @@ public enum ToolCommands {
         case .repair: flag = "-p"
         case .repairForce: flag = "-y"
         }
-        return Command(executable: paths.e2fsck, arguments: [flag, "-f", device])
+        return Command(executable: paths.e2fsck, arguments: [flag, "-f", "-C", "1", device])
     }
 
     /// Quick NTFS format: `mkntfs --quick --label <label> <device>`.

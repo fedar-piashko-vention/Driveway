@@ -90,9 +90,9 @@ private let p = ToolPaths()
 
 @Test func e2fsckModes() {
     let dev = "/dev/disk5s1"
-    #expect(ToolCommands.e2fsck(device: dev, mode: .check, paths: p).arguments == ["-n", "-f", dev])
-    #expect(ToolCommands.e2fsck(device: dev, mode: .repair, paths: p).arguments == ["-p", "-f", dev])
-    #expect(ToolCommands.e2fsck(device: dev, mode: .repairForce, paths: p).arguments == ["-y", "-f", dev])
+    #expect(ToolCommands.e2fsck(device: dev, mode: .check, paths: p).arguments == ["-n", "-f", "-C", "1", dev])
+    #expect(ToolCommands.e2fsck(device: dev, mode: .repair, paths: p).arguments == ["-p", "-f", "-C", "1", dev])
+    #expect(ToolCommands.e2fsck(device: dev, mode: .repairForce, paths: p).arguments == ["-y", "-f", "-C", "1", dev])
     #expect(ToolCommands.e2fsck(device: dev, mode: .check, paths: p).executable == "/opt/homebrew/opt/e2fsprogs/sbin/e2fsck")
 }
 

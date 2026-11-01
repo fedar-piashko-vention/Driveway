@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	driveway_ext.fs: a probe-only filesystem bundle, installed in /Library/Filesystems. DiskArbitration runs
+	driveway_ext.util on matching partitions; once it recognises ext, DiskArbitration ties Driveway's ext4fuse
+	mount to the disk and Finder lists the volume. There is no mount tool: the helper refuses macOS's own mount
+	of this kind (CFBundleName is DiskArbitration's volume kind, ExtProbe.volumeKind).
+	Probe order: Apple's msdos, exfat and ntfs probe Microsoft Basic Data at 2000, so this one goes after them.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>app.driveway.filesystems.ext</string>
+	<key>CFBundleName</key>
+	<string>driveway_ext</string>
+	<key>CFBundleDisplayName</key>
+	<string>Driveway ext</string>
+	<key>CFBundlePackageType</key>
+	<string>fs  </string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0-dev</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>FSMediaTypes</key>
+	<dict>
+		<key>0FC63DAF-8483-4772-8E79-3D69D8477DE4</key>
+		<dict>
+			<key>FSMediaProperties</key>
+			<dict>
+				<key>Content Hint</key>
+				<string>0FC63DAF-8483-4772-8E79-3D69D8477DE4</string>
+				<key>Leaf</key>
+				<true/>
+			</dict>
+			<key>FSProbeArguments</key>
+			<string>-p</string>
+			<key>FSProbeExecutable</key>
+			<string>driveway_ext.util</string>
+			<key>FSProbeOrder</key>
+			<integer>1000</integer>
+		</dict>
+		<key>EBD0A0A2-B9E5-4433-87C0-68B6B72699C7</key>
+		<dict>
+			<key>FSMediaProperties</key>
+			<dict>
+				<key>Content Hint</key>
+				<string>EBD0A0A2-B9E5-4433-87C0-68B6B72699C7</string>
+				<key>Leaf</key>
+				<true/>
+			</dict>
+			<key>FSProbeArguments</key>
+			<string>-p</string>
+			<key>FSProbeExecutable</key>
+			<string>driveway_ext.util</string>
+			<key>FSProbeOrder</key>
+			<integer>3000</integer>
+		</dict>
+		<key>Linux</key>
+		<dict>
+			<key>FSMediaProperties</key>
+			<dict>
+				<key>Content Hint</key>
+				<string>Linux</string>
+				<key>Leaf</key>
+				<true/>
+			</dict>
+			<key>FSProbeArguments</key>
+			<string>-p</string>
+			<key>FSProbeExecutable</key>
+			<string>driveway_ext.util</string>
+			<key>FSProbeOrder</key>
+			<integer>1000</integer>
+		</dict>
+	</dict>
+	<key>FSPersonalities</key>
+	<dict>
+		<key>driveway_ext</key>
+		<dict>
+			<key>FSName</key>
+			<string>Linux ext (Driveway)</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

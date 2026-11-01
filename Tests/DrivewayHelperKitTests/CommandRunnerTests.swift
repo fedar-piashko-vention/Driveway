@@ -3,6 +3,16 @@ import DrivewayHelperKit
 import Foundation
 import Testing
 
+@Test func processRunnerStreamsStdoutLines() async throws {
+    let lines = Box<[String]>([])
+    let result = try await ProcessCommandRunner().run(
+        Command(executable: "/usr/bin/printf", arguments: ["start\\n  0.00 percent completed\\r 50.00 percent completed\\rend"]),
+        onOutputLine: { line in lines.value.append(line) })
+    #expect(lines.value == ["start", "  0.00 percent completed", " 50.00 percent completed", "end"])
+    // The result still carries everything.
+    #expect(result.stdout == "start\n  0.00 percent completed\r 50.00 percent completed\rend")
+}
+
 @Test func processRunnerCapturesOutputAndExitCode() async throws {
     let runner = ProcessCommandRunner()
     let ok = try await runner.run(Command(executable: "/bin/echo", arguments: ["hello world"]))
