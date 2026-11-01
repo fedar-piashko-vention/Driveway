@@ -35,9 +35,9 @@ final class DiskManagerModel {
     private(set) var backups: [String: String] = [:]
     /// The format in flight, if any. Set from the moment it's handed to the model until the list is current again.
     private(set) var formatting: FormatInProgress?
-    /// The features the Setup scan found ready. The Format tab only offers the filesystems these make usable.
-    /// Everything counts as ready until the scanner (which fills this in) exists.
-    var readyFeatures: Set<Feature> = Set(Feature.allCases)
+    /// The features the Setup scan found ready; `SetupModel` sets it after every scan. The Format tab only offers the
+    /// filesystems these make usable. Until the first scan, only what's built into macOS counts as ready.
+    var readyFeatures: Set<Feature> = [.readNTFS]
 
     @ObservationIgnored private let client: HelperClient
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
