@@ -45,6 +45,9 @@ public actor HelperService {
         var blocked: Set<String> = []
         /// Whole disks being formatted: macOS may mount anything on them meanwhile.
         var formatting: Set<String> = []
+        /// The settings as last loaded or saved. The helper is the only writer of the settings file, so
+        /// the file is read once, at init; the mount-approval callback never touches it.
+        var settings = DrivewaySettings()
     }
     let shared = Mutex(Shared())
 
@@ -65,6 +68,17 @@ public actor HelperService {
         self.consoleUser = consoleUser
         self.features = features
         self.log = log
+        let loaded = settings.load()
+        shared.withLock { $0.settings = loaded }
+    }
+
+    /// The settings held in memory.
+    nonisolated var currentSettings: DrivewaySettings { shared.withLock { $0.settings } }
+
+    /// Writes the settings file, then (only if that worked) the copy in memory.
+    func saveSettings(_ s: DrivewaySettings) throws {
+        try store.save(s)
+        shared.withLock { $0.settings = s }
     }
 
     // MARK: - Requests
@@ -72,7 +86,7 @@ public actor HelperService {
     public func handle(_ request: HelperRequest, authorization: Data?) async -> HelperResponse {
         switch request {
         case .listVolumes: return .volumes(await listVolumes())
-        case .getSettings: return .settings(store.load())
+        case .getSettings: return .settings(currentSettings)
         case .setSettings(let s): return setSettings(s, authorization: authorization)
         case .helperVersion: return .version(helperProtocolVersion)
         case .backendStatus: return .backend(await backendAvailability())
@@ -118,7 +132,7 @@ public actor HelperService {
     func context() async -> Context? {
         let boot = await inventory.bootWholeDisks()
         let disks = await inventory.disks()
-        let settings = store.load()
+        let settings = currentSettings
         shared.withLock {
             $0.boot = boot
             $0.disks = disks
@@ -179,7 +193,7 @@ public actor HelperService {
     /// The app can't clear the helper's own FSKit record, and turning on disk images (which loosens
     /// protection) needs an administrator.
     private func setSettings(_ new: DrivewaySettings, authorization: Data?) -> HelperResponse {
-        let stored = store.load()
+        let stored = currentSettings
         if new.allowDiskImagesForTesting, !stored.allowDiskImagesForTesting,
            !auth.verify(authorization, right: AuthorizationRights.modifyDisk)
         {
@@ -188,7 +202,7 @@ public actor HelperService {
         var s = new
         s.fskitFailedOnOSBuild = stored.fskitFailedOnOSBuild
         do {
-            try store.save(s)
+            try saveSettings(s)
             return .ok
         } catch {
             return .error(.commandFailed("Couldn't save settings: \(error.localizedDescription)"))
@@ -224,7 +238,8 @@ public actor HelperService {
     /// The caller holds the disk's queue.
     private func appeared(_ disk: DiskDescription) async -> VolumeEvent? {
         guard let ctx = await context() else { return nil }
-        let d = ctx.disks.first { $0.bsdName == disk.bsdName } ?? disk
+        // Gone already: its disappearance overtook this event.
+        guard let d = ctx.disks.first(where: { $0.bsdName == disk.bsdName }) else { return nil }
         guard !ctx.policy.isProtected(d, allDisks: ctx.disks) else { return nil }
         if let existing = mounts[d.bsdName] { return .mounted(existing) }
 
@@ -270,12 +285,13 @@ public actor HelperService {
     public nonisolated func shouldApproveMacOSMount(_ disk: DiskDescription) -> Bool {
         let bsd = disk.bsdName
         guard Self.isValidBSDName(bsd) else { return true }
+        // One lock, no file access: this runs on DiskArbitration's callback queue.
         let s = shared.withLock { $0 }
         // Driveway's own claim wins over everything, including a format in progress on the disk.
         if s.claimed.contains(bsd) || s.blocked.contains(bsd) { return false }
         if s.formatting.contains(Self.lockKey(bsd)) || s.macOSMountAllowed.contains(bsd) { return true }
         guard let boot = s.boot, !boot.isEmpty, case .ready = s.backend else { return true }
-        let settings = store.load()
+        let settings = s.settings
         let policy = ProtectionPolicy(bootWholeDisks: boot, allowDiskImages: settings.allowDiskImagesForTesting)
         if policy.isProtected(disk, allDisks: s.disks) { return true }
         let fs = s.detected[bsd]

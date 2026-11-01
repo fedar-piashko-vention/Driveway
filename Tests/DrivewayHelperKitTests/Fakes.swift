@@ -76,6 +76,7 @@ final class FakeInventory: DiskInventoryProviding {
         var mounted: Bool
         var headerReads: [String] = []
         var mountChecks: [String] = []
+        var readOnlyMounts: Set<String> = []
     }
     private let state: Mutex<State>
 
@@ -84,6 +85,7 @@ final class FakeInventory: DiskInventoryProviding {
     }
 
     func setDisks(_ disks: [DiskDescription]) { state.withLock { $0.disks = disks } }
+    func setReadOnlyMounts(_ paths: Set<String>) { state.withLock { $0.readOnlyMounts = paths } }
     var headerReads: [String] { state.withLock { $0.headerReads } }
     var mountChecks: [String] { state.withLock { $0.mountChecks } }
 
@@ -106,14 +108,25 @@ final class FakeInventory: DiskInventoryProviding {
             return s.mounted
         }
     }
+
+    func mountIsReadOnly(_ mountPoint: String) -> Bool? {
+        state.withLock { $0.readOnlyMounts.contains(mountPoint) }
+    }
 }
 
 final class MemorySettings: SettingsStoring {
     struct SaveFailed: Error {}
-    private let state: Mutex<(settings: DrivewaySettings, failSaves: Bool)>
-    init(_ s: DrivewaySettings = DrivewaySettings(), failSaves: Bool = false) { state = Mutex((s, failSaves)) }
+    private let state: Mutex<(settings: DrivewaySettings, failSaves: Bool, loads: Int)>
+    init(_ s: DrivewaySettings = DrivewaySettings(), failSaves: Bool = false) { state = Mutex((s, failSaves, 0)) }
     var current: DrivewaySettings { state.withLock { $0.settings } }
-    func load() -> DrivewaySettings { state.withLock { $0.settings } }
+    /// How many times `load()` was called.
+    var loads: Int { state.withLock { $0.loads } }
+    func load() -> DrivewaySettings {
+        state.withLock {
+            $0.loads += 1
+            return $0.settings
+        }
+    }
     func save(_ s: DrivewaySettings) throws {
         try state.withLock {
             if $0.failSaves { throw SaveFailed() }

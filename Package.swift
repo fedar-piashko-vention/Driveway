@@ -17,7 +17,9 @@ let package = Package(
             dependencies: ["DrivewayCore", "DrivewayIPC"],
             linkerSettings: [
                 .linkedFramework("DiskArbitration"),
+                .linkedFramework("IOKit"),
                 .linkedFramework("Security"),
+                .linkedFramework("SystemConfiguration"),
             ]
         ),
         .executableTarget(name: "DrivewayHelper", dependencies: ["DrivewayHelperKit"]),

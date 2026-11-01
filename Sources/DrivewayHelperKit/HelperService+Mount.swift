@@ -275,10 +275,10 @@ extension HelperService {
     func recordFSKitFailure() {
         fskitFailedThisBuild = true
         shared.withLock { $0.backend = .unavailable }
-        var s = store.load()
+        var s = currentSettings
         s.fskitFailedOnOSBuild = osBuild
         do {
-            try store.save(s)
+            try saveSettings(s)
         } catch {
             log("Couldn't save the FSKit failure for \(osBuild): \(error.localizedDescription)")
         }
@@ -328,7 +328,7 @@ extension HelperService {
 
     func backendAvailability() async -> BackendAvailability {
         let p = await backendProbe.probe()
-        let failedHere = fskitFailedThisBuild || store.load().fskitFailedOnOSBuild == osBuild
+        let failedHere = fskitFailedThisBuild || currentSettings.fskitFailedOnOSBuild == osBuild
         let availability = BackendPolicy.availability(
             kextsAllowed: p.kextsAllowed, kextApproved: p.kextApproved, fskitEnabled: p.fskitEnabled,
             fskitFailedOnThisOS: failedHere)
