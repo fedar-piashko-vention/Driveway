@@ -139,7 +139,10 @@ extension HelperService {
         case .ntfs:
             (result, remountError) = await whileUnmounted(d, ctx, ToolCommands.ntfsfix(device: device, mode: mode, paths: paths))
         case .ext2, .ext3, .ext4:
-            (result, remountError) = await whileUnmounted(d, ctx, ToolCommands.e2fsck(device: device, mode: mode, paths: paths))
+            let progress = ProgressReport(
+                bsdName: d.bsdName, operation: mode == .check ? .check : .repair, parser: E2fsckProgress())
+            (result, remountError) = await whileUnmounted(
+                d, ctx, ToolCommands.e2fsck(device: device, mode: mode, paths: paths), progress: progress)
         case .other:
             return .error(.commandFailed("Check and repair aren't available for this drive's format."))
         }
@@ -164,7 +167,8 @@ extension HelperService {
             return .error(.commandFailed(Self.badImagePathMessage))
         }
         let command = ToolCommands.ntfsclone(device: "/dev/\(d.bsdName)", imagePath: imagePath, paths: paths)
-        let (result, remountError) = await whileUnmounted(d, ctx, command)
+        let progress = ProgressReport(bsdName: d.bsdName, operation: .backup, parser: NtfscloneProgress())
+        let (result, remountError) = await whileUnmounted(d, ctx, command, progress: progress)
         let failure: String?
         switch result {
         case .failure(let e): failure = Self.text(e)
@@ -190,13 +194,14 @@ extension HelperService {
     /// Unmounts `d` if it is mounted, runs `command`, then gives the drive back to whoever held it: Driveway
     /// mounts it again only if Driveway held it; otherwise macOS (or the driver that had it) mounts it. The second
     /// value is a sentence describing a remount that didn't go as before: read-only by macOS, or not mounted at all.
+    /// `progress` reports how far `command` has got while it runs.
     func whileUnmounted(
-        _ d: DiskDescription, _ ctx: Context, _ command: Command
+        _ d: DiskDescription, _ ctx: Context, _ command: Command, progress: ProgressReport? = nil
     ) async -> (Result<CommandResult, HelperError>, String?) {
         let heldByDriveway = mounts[d.bsdName] != nil
         let wasMounted = d.volumePath != nil || heldByDriveway
         if let e = await unmountForRawAccess(d) { return (.failure(e), nil) }
-        let result = await run(command, unbounded: true)
+        let result = await run(command, unbounded: true, progress: progress)
         guard wasMounted else { return (result, nil) }
         guard heldByDriveway else {
             guard case .failure(let e) = await handBackToMacOS(d.bsdName) else { return (result, nil) }
@@ -496,7 +501,9 @@ extension HelperService {
     }
 
     static func report(_ fs: FilesystemKind, mode: CheckMode, _ r: CommandResult) -> CheckReport {
-        let raw = [r.stdout, r.stderr].filter { !$0.isEmpty }.joined(separator: "\n")
+        // e2fsck's progress lines were shown as the progress bar; they'd only clutter the report.
+        let stdout = [.ext2, .ext3, .ext4].contains(fs) ? E2fsckProgress.removingProgressLines(from: r.stdout) : r.stdout
+        let raw = [stdout, r.stderr].filter { !$0.isEmpty }.joined(separator: "\n")
         let succeeded: Bool
         let summary: String
         switch fs {

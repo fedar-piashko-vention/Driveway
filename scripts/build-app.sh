@@ -19,6 +19,9 @@ AGENT_APP="${APP}/Contents/Library/LoginItems/DrivewayAgent.app"
 # The helper ships as a small app bundle so System Settings → Login Items names it "Driveway", with the icon.
 HELPER_APP="${APP}/Contents/Library/LaunchServices/app.driveway.helper.app"
 HELPER="${HELPER_APP}/Contents/MacOS/app.driveway.helper"
+# A probe-only filesystem bundle; the installer copies it to /Library/Filesystems so macOS recognises ext partitions.
+EXT_FS="${APP}/Contents/Library/Filesystems/driveway_ext.fs"
+EXT_PROBE="${EXT_FS}/Contents/Resources/driveway_ext.util"
 DMG="build/Driveway-${VERSION}.dmg"
 STAGING="build/dmg-staging"
 
@@ -42,16 +45,20 @@ BIN="$(swift build -c release --arch arm64 --show-bin-path)"
 rm -rf "${APP}" "${STAGING}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources" \
     "${APP}/Contents/Library/LaunchServices" \
-    "${AGENT_APP}/Contents/MacOS" "${HELPER_APP}/Contents/MacOS" "${HELPER_APP}/Contents/Resources"
+    "${AGENT_APP}/Contents/MacOS" "${HELPER_APP}/Contents/MacOS" "${HELPER_APP}/Contents/Resources" \
+    "${EXT_FS}/Contents/Resources"
 
 cp "${BIN}/Driveway" "${APP}/Contents/MacOS/Driveway"
 cp "${BIN}/DrivewayHelper" "${HELPER}"
 cp "${BIN}/DrivewayAgent" "${AGENT_APP}/Contents/MacOS/DrivewayAgent"
+cp "${BIN}/DrivewayExtProbe" "${EXT_PROBE}"
 
 cp Packaging/Driveway-Info.plist "${APP}/Contents/Info.plist"
 cp Packaging/DrivewayAgent-Info.plist "${AGENT_APP}/Contents/Info.plist"
 cp Packaging/DrivewayHelper-Info.plist "${HELPER_APP}/Contents/Info.plist"
-for plist in "${APP}/Contents/Info.plist" "${AGENT_APP}/Contents/Info.plist" "${HELPER_APP}/Contents/Info.plist"; do
+cp Packaging/DrivewayExtFS-Info.plist "${EXT_FS}/Contents/Info.plist"
+for plist in "${APP}/Contents/Info.plist" "${AGENT_APP}/Contents/Info.plist" "${HELPER_APP}/Contents/Info.plist" \
+    "${EXT_FS}/Contents/Info.plist"; do
     plutil -replace CFBundleShortVersionString -string "${VERSION}" "${plist}"
 done
 plutil -replace CFBundleExecutable -string Driveway "${APP}/Contents/Info.plist"
@@ -71,13 +78,15 @@ chmod 755 "${APP}/Contents/Resources/install-helper.sh" "${APP}/Contents/Resourc
 # lack the runtime flag. Only the app carries entitlements: Apple Events, so the
 # osascript it starts may drive Terminal (TCC attributes those events to the app).
 codesign --force --options runtime -s - --identifier app.driveway.helper "${HELPER_APP}"
+codesign --force --options runtime -s - --identifier app.driveway.ext-probe "${EXT_PROBE}"
+codesign --force --options runtime -s - --identifier app.driveway.filesystems.ext "${EXT_FS}"
 codesign --force --options runtime -s - --identifier app.driveway.agent "${AGENT_APP}"
 codesign --force --options runtime -s - --identifier app.driveway.Driveway \
     --entitlements Packaging/Driveway.entitlements "${APP}"
 
 codesign --verify --deep --strict "${APP}"
 # Require the runtime flag inside the CodeDirectory flags, e.g. flags=0x10002(adhoc,runtime).
-for target in "${APP}" "${AGENT_APP}" "${HELPER_APP}"; do
+for target in "${APP}" "${AGENT_APP}" "${HELPER_APP}" "${EXT_PROBE}"; do
     SIG="$(codesign -dv "${target}" 2>&1)"
     if [[ "${SIG}" != *flags=0x*"("*runtime*")"* ]]; then
         echo "Signature of ${target} lacks the hardened runtime flag:" >&2

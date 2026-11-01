@@ -92,6 +92,11 @@ public enum ReadOnlyReason: Codable, Equatable, Sendable {
     case error(String)
 }
 
+/// A long drive operation whose tool reports how far it has got.
+public enum ProgressOperation: String, Codable, Sendable {
+    case check, repair, backup
+}
+
 /// Pushed from the helper to connected clients when a drive changes.
 public enum VolumeEvent: Codable, Equatable, Sendable {
     case mounted(Volume)
@@ -99,6 +104,9 @@ public enum VolumeEvent: Codable, Equatable, Sendable {
     case backedOff(Volume, driver: String)
     case mountFailed(Volume, message: String)
     case removed(bsdName: String)
+    /// How much of `operation` on the drive is done, 0...1. Sent about twice a second while it runs; the drive
+    /// itself hasn't changed.
+    case progress(bsdName: String, operation: ProgressOperation, fraction: Double)
 }
 
 extension ReadOnlyReason {
@@ -127,6 +135,8 @@ extension VolumeEvent {
         switch self {
         case .removed(let bsdName):
             return volumes.filter { $0.bsdName != bsdName }
+        case .progress:
+            return volumes
         case .mounted(let v), .mountedReadOnly(let v, _), .backedOff(let v, _), .mountFailed(let v, _):
             updated = v
         }
