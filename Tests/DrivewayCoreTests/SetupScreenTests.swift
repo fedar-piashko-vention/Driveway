@@ -59,20 +59,20 @@ struct SetupScreenTests {
         hasExt4fuse: true, hasE2fsprogs: true, helperVersion: "1.0.0", appVersion: "1.0.0", conflictingDrivers: [])
 
     @Test func groupsFollowFeatureOrderWithMockupTitles() {
-        let groups = SetupScreen.groups(featureStates(empty, ntfsWriteSupported: true))
+        let groups = SetupScreen.groups(featureStates(empty, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)
         #expect(groups.map(\.feature) == [.readNTFS, .writeNTFS, .repairNTFS, .extDrives])
         #expect(groups.map(\.title) == ["Read NTFS drives", "Write to NTFS drives", "Check & Repair NTFS", "ext drives (optional)"])
     }
 
     @Test func readNTFSIsBuiltIn() {
-        let read = SetupScreen.groups(featureStates(empty, ntfsWriteSupported: true))[0]
+        let read = SetupScreen.groups(featureStates(empty, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)[0]
         #expect(read.state == .ready)
         #expect(read.detail == "Built into macOS")
         #expect(read.items.isEmpty)
     }
 
     @Test func lockedGroupListsMissingRequirementsInUnlockOrder() {
-        let write = SetupScreen.groups(featureStates(empty, ntfsWriteSupported: true))[1]
+        let write = SetupScreen.groups(featureStates(empty, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)[1]
         #expect(write.items.map(\.requirement) == [.homebrew, .macFUSE, .ntfs3g, .helper])
         #expect(write.items.map(\.label) == ["Homebrew", "macFUSE 5.4 or later", "ntfs-3g", "Driveway helper"])
         #expect(write.items.allSatisfy { $0.symbol == "❌" })
@@ -82,7 +82,7 @@ struct SetupScreenTests {
         var inv = full
         inv.backend = .needsApproval(.kernel)
         inv.helperVersion = "0.9.0"
-        let write = SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true))[1]
+        let write = SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)[1]
         #expect(write.items.map(\.requirement) == [.macFUSEApproval(.kernel), .helperUpdate])
         #expect(write.items.map(\.symbol) == ["⚠️", "⚠️"])
         #expect(write.items[0].label == "macFUSE — needs approval in System Settings → Privacy & Security")
@@ -91,11 +91,11 @@ struct SetupScreenTests {
         inv.backend = .needsApproval(.fskit)
         inv.macFUSEVersion = SemanticVersion("5.5.0")
         #expect(
-            SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true))[1].items[0].label
+            SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)[1].items[0].label
                 == "macFUSE — needs approval in System Settings → General → Login Items & Extensions")
 
         inv.macFUSEVersion = SemanticVersion("5.3.2")
-        let old = SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true))[1].items[0]
+        let old = SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)[1].items[0]
         #expect(old.label == "macFUSE 5.3.2 — needs update to 5.4 or later")
         #expect(old.symbol == "⚠️")
     }
@@ -103,7 +103,7 @@ struct SetupScreenTests {
     @Test func notAvailableYetShowsTheReasonInsteadOfItems() {
         var inv = full
         inv.backend = .unavailable
-        let write = SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true))[1]
+        let write = SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15)[1]
         #expect(write.state == .notAvailableYet)
         #expect(write.items.isEmpty)
         #expect(write.detail == "\(Copy.notAvailableOnThisMac). \(Copy.noBackendReason)")
@@ -112,17 +112,17 @@ struct SetupScreenTests {
     @Test func readyFeatures() {
         var inv = full
         inv.hasExt4fuse = false
-        #expect(SetupScreen.readyFeatures(featureStates(inv, ntfsWriteSupported: true)) == [.readNTFS, .writeNTFS, .repairNTFS])
+        #expect(SetupScreen.readyFeatures(featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15)) == [.readNTFS, .writeNTFS, .repairNTFS])
     }
 
     @Test func unlockOrderForOneFeatureIsItsRequirementOrder() {
-        let states = featureStates(empty, ntfsWriteSupported: true)
+        let states = featureStates(empty, ntfsWriteSupported: true, macOSMajor: 15)
         #expect(SetupScreen.unlockOrder(for: [.extDrives], in: states) == [.homebrew, .macFUSE, .ext4fuse, .e2fsprogs, .helper])
         #expect(SetupScreen.unlockOrder(for: [.readNTFS], in: states).isEmpty)
     }
 
     @Test func unlockEverythingDeduplicatesAndInstallsTheHelperLast() {
-        let states = featureStates(empty, ntfsWriteSupported: true)
+        let states = featureStates(empty, ntfsWriteSupported: true, macOSMajor: 15)
         #expect(
             SetupScreen.unlockOrder(for: Feature.allCases, in: states)
                 == [.homebrew, .macFUSE, .ntfs3g, .ext4fuse, .e2fsprogs, .helper])
@@ -132,7 +132,7 @@ struct SetupScreenTests {
         var inv = full
         inv.backend = .unavailable
         inv.hasNTFS3G = false
-        let states = featureStates(inv, ntfsWriteSupported: true)
+        let states = featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15)
         #expect(SetupScreen.unlockOrder(for: Feature.allCases, in: states) == [.ntfs3g])
     }
 
@@ -191,11 +191,11 @@ struct SetupScreenTests {
             .homebrew, .macFUSE, .macFUSEUpdate(installed: SemanticVersion("5.3.0")!), .macFUSEApproval(.kernel),
             .macFUSEApproval(.fskit), .ntfs3g, .ext4fuse, .e2fsprogs, .helper, .helperUpdate, .fullDiskAccess,
         ]
-        texts += requirements.map(Copy.requirementLabel)
+        texts += requirements.map { Copy.requirementLabel($0) }
         texts += requirements.compactMap(Copy.afterHandoff)
         var inv = full
         inv.backend = .unavailable
-        texts += SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true)).compactMap(\.detail)
+        texts += SetupScreen.groups(featureStates(inv, ntfsWriteSupported: true, macOSMajor: 15), macOSMajor: 15).compactMap(\.detail)
         for text in texts {
             let lowered = text.lowercased()
             for banned in ["sip", "csrutil", "disable", "lower", "reduce", "recovery", "startup security"] {
