@@ -1,87 +1,326 @@
-# Driveway
+<p align="center">
+  <img src="Packaging/Icon/Driveway-1024.png" width="128" height="128" alt="Driveway icon">
+</p>
 
-Driveway is a free, open-source utility that mounts NTFS drives read/write on Apple Silicon Macs. It is a free replacement for the parts of Tuxera NTFS for Mac that most people use. It does not contain a filesystem driver of its own. It orchestrates existing tools: macFUSE, ntfs-3g and e2fsprogs, installed through Homebrew.
+<h1 align="center">Driveway</h1>
 
-- **Auto-mount.** Plug in an NTFS drive and it mounts read/write, with or without the Driveway window open. A drive plugged in before you logged in, or before Setup was finished, is mounted read/write once you log in or Setup finishes. A drive macOS holds read-only also has a **Mount read/write** button in its Info tab.
-- **Disk Manager.** A window with a sidebar of your drives and three tabs: **Info**, **Check & Repair** and **Format**.
-- **Setup.** A screen that shows which features are ready, which tools are missing, and installs them for you.
-- **Dirty drives are never changed silently.** A drive Windows did not shut down cleanly mounts read-only, and you get a notification and a **Fix & mount read/write** button. Driveway mounts with ntfs-3g's `norecover` option, so ntfs-3g never clears the Windows journal on its own, and a drive that ntfs-3g mounts read-only anyway is reported as dirty or hibernated, not as read/write.
+<p align="center">
+  Use Windows (NTFS) and Linux (ext) drives on your Apple Silicon Mac.<br>
+  Free and open source. No account, no licence key, nothing to buy.
+</p>
 
-## Limits, stated plainly
+<p align="center">
+  <a href="https://github.com/fedar-piashko-vention/Driveway/releases/latest"><b>Download the latest version</b></a>
+  ·
+  <a href="#install">Install guide</a>
+  ·
+  <a href="#questions-and-problems">Questions and problems</a>
+</p>
 
-- **NTFS writing needs a working mount backend.** Driveway uses macFUSE's kernel backend on a Mac that already allows third-party kernel extensions (for example because Tuxera or Paragon is or was installed). Otherwise it uses macFUSE's FSKit backend. FSKit is currently broken on macOS 15.7.x: mounts fail even for simple test filesystems. On such a Mac with default settings, drives cannot be written yet, and Setup says "Not available on this Mac yet". Drives stay readable through macOS's own read-only NTFS support.
-- **Driveway never asks you to lower your Mac's security.** It does not guide you through Recovery or kernel-extension settings, and it never changes them itself. Where the kernel backend is available, that is because your Mac already allows it.
-- **Hibernated and Fast Startup drives mount read-only, with no one-click fix.** Forcing such a drive read/write would destroy the unsaved Windows session. Shut Windows down fully, or turn off Fast Startup with `powercfg /hibernate off` in Windows.
-- **ext drives are read-only in v1.** The Homebrew tap Driveway uses has no read/write ext driver. ext volumes mount read-only through `ext4fuse`. Check & Repair and Format for ext work through e2fsprogs. Mounted ext drives don't appear in Finder's sidebar yet: macOS can't recognise ext partitions, and Finder lists only drives it recognises. Open them with **Show in Finder** in Driveway, or from `/Volumes`.
-- **`ntfsfix` is not `chkdsk`.** Check & Repair fixes common problems, such as a drive that was unplugged without ejecting. It does not repair deeper damage. For that, connect the drive to a Windows PC and run `chkdsk /f`. Back up first. Driveway offers to image the drive before a repair.
-- **Speed was measured only on a disk image.** With the kernel backend, ntfs-3g wrote 1 GB to a 2 GB disk image on the internal SSD at about 206 MB/s. That is not representative of a USB drive, and no real-drive or FSKit number exists yet. FSKit is documented by macFUSE as slower than the kernel backend, and ntfs-3g is likely to be slower than Tuxera. That trade-off is accepted.
-- **Full Disk Access may need granting again after an update.** Because the helper is ad-hoc signed, macOS may not recognise an updated helper as the program you allowed. Setup then lists Full Disk Access again. In Full Disk Access, remove the helper with **−** and add it again.
-- **Unsigned build.** There is no paid Apple Developer account behind this project, so builds are ad-hoc signed and not notarized. Each user has to allow the app once (see below). Whether to trust it is your decision. The source is here, and you can build it yourself.
-- **Not tested on Intel Macs.**
+<p align="center">
+  <img src="docs/images/disk-manager.png" width="760" alt="Driveway's Disk Manager showing an NTFS drive mounted read/write">
+</p>
 
-## Requirements
+Macs can open drives formatted on Windows, but they can't save anything to them. Driveway is a free alternative to Tuxera NTFS for Mac and Paragon NTFS for anyone who can't buy them or doesn't want to pay for them. Plug in a drive and Driveway mounts it so you can copy, rename and delete files in Finder as usual. It can also check, repair, back up and format drives.
 
-- macOS 15.4 or later
-- Apple Silicon
-- [Homebrew](https://brew.sh), at `/opt/homebrew`
-- macFUSE 5.4.0 or later. Earlier 5.x versions can write zero-filled data for small writes on FSKit, so Driveway does not use them for writing. With an older macFUSE, Setup shows macFUSE as needing an update, and Driveway does not mount NTFS drives read/write. They stay read-only, as macOS mounts them. Setup installs macFUSE for you, and macFUSE's licence does not allow bundling it.
+Driveway doesn't contain a filesystem driver of its own. It sets up and runs well-known free tools for you: [macFUSE](https://macfuse.github.io), [ntfs-3g](https://github.com/tuxera/ntfs-3g) and [e2fsprogs](https://e2fsprogs.sourceforge.net).
 
-## Uninstall Tuxera and Paragon first
+## Contents
 
-Tuxera NTFS for Mac and Paragon NTFS install their own filesystem drivers, which claim NTFS drives before Driveway can. Driveway never fights another driver for a drive: if one of them mounts a drive, Driveway backs off and the drive's Info tab says who mounted it. Setup shows a warning when it finds one of them. Remove them with their own uninstallers before using Driveway.
+- [What it does](#what-it-does)
+- [What works on your Mac](#what-works-on-your-mac)
+- [Install](#install)
+- [Using Driveway](#using-driveway)
+- [Questions and problems](#questions-and-problems)
+- [Uninstall](#uninstall)
+- [For developers](#for-developers)
+- [Licence](#licence)
+
+## What it does
+
+- **Plug in and write.** NTFS drives mount read/write by themselves, whether or not the Driveway window is open. A drive that was already plugged in when you logged in is taken over within a few seconds.
+- **Disk Manager.** One window lists your drives, with three tabs: **Info**, **Check & Repair** and **Format**.
+- **Setup does the installing.** The Setup screen shows what your Mac can do, what's missing, and installs it for you.
+- **Your files come first.** If Windows didn't shut a drive down properly, Driveway mounts it read-only and tells you, instead of writing to it and risking your files. One click, **Fix & mount read/write**, repairs it when you're ready.
+- **Back up before a repair.** **Back up first** saves a complete copy of the drive to a file, with a progress bar.
+- **Linux drives too.** ext2, ext3 and ext4 drives open read-only and show up in Finder's sidebar.
+
+## What works on your Mac
+
+What Driveway can do depends on your version of macOS and on your Mac's security settings. You don't need to work this out yourself: Setup checks your Mac and shows each feature as ready, missing something, or not available.
+
+| | macOS 15, standard security | macOS 26 or later, standard security | Kernel extensions already allowed |
+|---|---|---|---|
+| See and copy files from NTFS drives | Yes | Yes | Yes |
+| **Save files to NTFS drives** | **No** | **Expected, not yet tested** | **Yes** |
+| Check & Repair, Back up first (NTFS) | Yes | Yes | Yes |
+| Format as exFAT or FAT32 | Yes | Yes | Yes |
+| Format as NTFS | No | Expected, not yet tested | Yes |
+| Linux (ext) drives | No | Expected, not yet tested | Yes |
+
+**Standard security** is how every Mac comes from the factory. You almost certainly have it unless you changed it yourself in Recovery.
+
+**Kernel extensions already allowed** means that your Mac was set up earlier to accept third-party system extensions, usually because Tuxera, Paragon or another disk tool was installed on it at some point. If that's the case, Driveway can save files to NTFS drives on any supported macOS.
+
+**Why macOS 15 can't save files with standard security.** On a Mac with standard security, macFUSE uses Apple's new FSKit system. FSKit is broken on recent macOS 15.7 updates: every attempt to mount a drive fails. Earlier 15.x versions haven't been tested, and Driveway tries FSKit there too. When Driveway sees this, Setup shows **Write to NTFS drives** as **Not available on this Mac yet**, and your drives stay readable as usual. Driveway tries again after each macOS or macFUSE update.
+
+**macOS 26 and later.** macFUSE has fixed many FSKit problems on macOS 26 and 27, and Driveway uses FSKit automatically when it can. Nobody has tested Driveway on macOS 26 or later yet. If you have one of those versions:
+
+- Try it first with a drive that has nothing important on it. Copy some files to it, eject it, and check that the files open on Windows.
+- Use macFUSE 5.5.0 or later. That version works around a problem in FSKit on macOS 26 and 27 that could return wrong data when reading files.
+- Please [tell us how it went](https://github.com/fedar-piashko-vention/Driveway/issues/new), whether it worked or not. That's how this table gets updated.
+
+**Driveway never asks you to lower your Mac's security**, and it never changes security settings itself. Some guides explain how to allow kernel extensions in Recovery. That makes your Mac less protected, and it's your decision alone. This guide doesn't cover it.
 
 ## Install
 
-1. Download `Driveway-<version>.dmg` from the [Releases](../../releases) page. Open it and drag **Driveway** onto the **Applications** shortcut.
-2. Open Driveway from Applications. macOS says it cannot verify the app and blocks it. Click **Done** (or **OK**).
-3. Open **System Settings > Privacy & Security** and scroll down to the Security section. You will see a message that "Driveway" was blocked. Click **Open Anyway**, then confirm with your password or Touch ID, and click **Open Anyway** once more in the dialog that follows.
-4. The Setup screen opens. Click **Unlock everything**, or unlock one feature at a time:
-   - The Homebrew tools install inside Setup, with live output: the `gromgit/fuse` tap formulas `ntfs-3g-mac` and `ext4fuse-mac`, and `e2fsprogs`. The tap prints "not trusted" warnings and asks for confirmation. Setup shows the question, and nothing proceeds until you click **Continue**.
-   - macFUSE is different. Setup opens a Terminal window that runs `brew install --cask macfuse`, and you type your password there. Afterwards Setup may show macFUSE as **Needs approval**, with an **Open Settings** button. This is macFUSE's own approval in the normal System Settings pane (Privacy & Security, or General > Login Items & Extensions), and Setup re-checks when you come back. A restart may follow. Driveway never asks you to change Recovery or any other security setting.
-   - The Driveway helper installs with one administrator password prompt. Installing it makes `/Applications/Driveway.app` owned by root (the helper only trusts an app that ordinary users can't change), so replacing or deleting the app afterwards asks for an administrator password.
-   - The helper then needs **Full Disk Access**. macOS lets a program open an external drive directly only with Full Disk Access, even when it runs as root. Tuxera's driver needs the same. Setup shows the step with an **Open Settings** button, which opens **System Settings > Privacy & Security > Full Disk Access**. Click **+**, press **⌘⇧G**, enter `/Library/PrivilegedHelperTools/app.driveway.helper.app` (Setup has a **Copy** button for it), click **Open** and turn the helper on. This gives one program access. It does not change a security setting. Without it, Driveway can't mount, check, repair, back up or format external drives: they stay read-only, mounted by macOS, and Driveway's notification and the drive's Info tab say that Full Disk Access is missing. A drive already plugged in is taken over within a few seconds of turning the helper on.
-5. Plug in an NTFS drive. It should mount read/write within a few seconds.
+The whole process takes about 20 minutes, most of it waiting for downloads. You need:
 
-Setup opens again by itself if something goes missing later, for example after a macOS update. You can also open it from **Driveway > Setup…**.
+- a Mac with Apple Silicon (M1 or later)
+- macOS 15.4 or later
+- an administrator account (the one you set up the Mac with is one)
+- an internet connection
 
-## Uninstall Driveway
+> [!TIP]
+> Not sure which Mac you have? Click the Apple menu  in the top-left corner and choose **About This Mac**. **Chip** should say Apple M1, M2, M3 or later, and **macOS** shows the version.
 
-Choose **Driveway > Uninstall Driveway Helper…** and confirm. This stops and removes the helper and the login agent, and gives the app back to you. Then drag Driveway from Applications to the Trash.
+### Step 1. Remove Tuxera or Paragon, if you have them
 
-To remove it by hand, in Terminal:
+If Tuxera NTFS for Mac or Paragon NTFS (or Paragon extFS) is installed, remove it first, using the uninstaller that came with it. These programs grab drives before Driveway can. Driveway never fights them for a drive: it leaves alone any drive they've mounted, and Setup warns you while one of them is installed.
+
+If you've never installed them, skip this step.
+
+### Step 2. Install Homebrew
+
+[Homebrew](https://brew.sh) is a free tool that installs software from the command line. Driveway uses it to install macFUSE and ntfs-3g for you. You only need to do this once.
+
+1. Open **Terminal**. It's in **Applications > Utilities**, or press ⌘ Space, type `Terminal` and press Return.
+2. Copy this whole line, paste it into Terminal and press Return:
+
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+3. When it asks for your **Password**, type the password you use to log in to your Mac and press Return. Nothing appears on screen while you type. That's normal.
+4. When it says `Press RETURN/ENTER to continue`, press Return.
+5. Wait. Homebrew may first install Apple's **Command Line Developer Tools**, which can take 10 minutes or more. It's finished when you see **Installation successful!**
+
+At the end, Homebrew shows **Next steps** with a few more commands to copy. Driveway doesn't need them, but they're harmless, and you'll want them if you use Homebrew yourself later.
+
+You can close Terminal now.
+
+### Step 3. Download Driveway
+
+1. Go to the [latest release](https://github.com/fedar-piashko-vention/Driveway/releases/latest) and click `Driveway-<version>.dmg` under **Assets** to download it.
+2. Open the downloaded file. A window opens with Driveway and an **Applications** folder.
+3. Drag **Driveway** onto **Applications**.
+
+Driveway has to run from the Applications folder. If you open it from anywhere else, it asks you to move it first.
+
+### Step 4. Open Driveway for the first time
+
+Driveway is not signed with a paid Apple developer certificate, so macOS stops it the first time. You allow it once:
+
+1. Open **Applications** and double-click **Driveway**. macOS says it can't verify that Driveway is free of malware. Click **Done**. Don't click **Move to Trash**.
+2. Open **System Settings** (Apple menu  > **System Settings**), click **Privacy & Security** in the sidebar, and scroll down to **Security**.
+3. You'll see "Driveway" was blocked to protect your Mac. Click **Open Anyway**.
+4. Enter your password or use Touch ID, then click **Open Anyway** once more.
+
+Driveway opens with the Setup screen.
+
+> [!NOTE]
+> This warning is about how the app is signed, not about what it does. All of Driveway's source code is in this repository for anyone to read. Whether to trust it is your choice.
+
+### Step 5. Run Setup
+
+<p align="center">
+  <img src="docs/images/setup.png" width="560" alt="Driveway's Setup screen">
+</p>
+
+Setup lists four features: **Read NTFS drives**, **Write to NTFS drives**, **Check & Repair NTFS** and **ext drives (optional)**, and shows what each one still needs. Click **Unlock everything**. Setup then goes through what's missing, one item at a time:
+
+1. **ntfs-3g, ext4fuse and e2fsprogs** install inside Setup, and you can watch the progress. One of them comes from a third-party Homebrew collection, so Homebrew asks you to confirm it. Setup shows the question and waits until you click **Continue**.
+2. **macFUSE** installs in a Terminal window that Setup opens for you. Type your password there when asked. When it finishes, switch back to Driveway.
+3. **macFUSE needs approval.** Setup shows **Needs approval** and an **Open Settings** button, which takes you to the right place in System Settings:
+   - On most Macs, this is **General > Login Items & Extensions**. Find **File System Extensions** and turn on **macFUSE**.
+   - On a Mac that already allows kernel extensions, it's **Privacy & Security**, where you click **Allow** for macFUSE. macOS may ask you to restart.
+4. **The Driveway helper** installs after one password prompt. The helper is the small part of Driveway that works with your drives in the background.
+5. **Full Disk Access.** macOS only lets a program work directly with an external drive if you give it Full Disk Access, which you do once:
+   1. Click **Open Settings** next to the Full Disk Access step. System Settings opens at **Privacy & Security > Full Disk Access**.
+   2. Click **+** at the bottom of the list and enter your password.
+   3. Press **⌘ Shift G**, paste `/Library/PrivilegedHelperTools/app.driveway.helper.app` and press Return. Setup has a **Copy** button for this path.
+   4. Click **Open**. **Driveway** (sometimes shown as `app.driveway.helper`) appears in the list. Make sure its switch is on.
+
+When everything is done, Setup shows **Ready** next to each feature your Mac supports. On a Mac where saving to NTFS isn't possible yet (see [What works on your Mac](#what-works-on-your-mac)), **Write to NTFS drives** shows **Not available on this Mac yet**. That's expected.
+
+### Step 6. Plug in a drive
+
+Plug in an NTFS drive. Within a few seconds it appears on the desktop and in Finder's sidebar, ready to use. Open Driveway to see it in the Disk Manager.
+
+Setup opens again by itself if something stops working later, for example after a macOS update. You can also open it any time from **Driveway > Setup…** in the menu bar.
+
+## Using Driveway
+
+### Every day
+
+You don't need to open Driveway. Plug in a drive, use it in Finder, and **eject it before you unplug it**: in Finder, click ⏏ next to the drive, or use **Eject** in Driveway. Pulling a drive out without ejecting can lose the last files you copied, and Windows will then report the drive as needing a check.
+
+### Disk Manager
+
+<p align="center">
+  <img src="docs/images/check-repair.png" width="640" alt="The Check & Repair tab">
+</p>
+
+Open Driveway to see every external drive. Select one to see its tabs:
+
+- **Info** shows the drive's capacity, filesystem, whether it's read/write, and who mounted it. It also has **Show in Finder**, **Eject**, and **Mount read/write** for an NTFS drive that's currently read-only.
+- **Check & Repair** checks the drive for problems and fixes common ones, such as a drive that was unplugged without ejecting. **Back up first** saves a copy of the whole drive to a file before you repair it. **Repair (force)…** is the last resort: it removes anything it can't fix, so copy your files off first.
+- **Format** erases a partition, or the whole disk, as exFAT, FAT32, NTFS or ext4. NTFS and ext4 are offered only when this Mac can use the result. It asks you to type the drive's name and your password, and it can't be undone.
+
+Check & Repair and Format temporarily unmount the drive while they work. Don't unplug it until they finish.
+
+### When a drive mounts read-only
+
+Driveway sends a notification and explains why in the drive's **Info** tab:
+
+- **Windows didn't shut this drive down cleanly.** This usually means the drive was unplugged from Windows without ejecting it. Click **Fix & mount read/write**. Driveway repairs it and mounts it read/write.
+- **Windows is hibernating (Fast Startup).** Windows saved its open session on the drive. Saving files to it from the Mac would destroy that session, so there's no one-click fix. Start Windows, then **Shut down** (not Restart or Sleep) while holding **Shift**. To stop it happening again, turn off Fast Startup by running `powercfg /hibernate off` as administrator in Windows.
+- **Full Disk Access is missing.** See [below](#driveway-asks-for-full-disk-access-again).
+- **Another driver mounted it.** Tuxera or Paragon got to the drive first. Remove them (see [Step 1](#step-1-remove-tuxera-or-paragon-if-you-have-them)).
+
+### Linux (ext) drives
+
+ext2, ext3 and ext4 drives open read-only. They appear in Finder's sidebar like any other drive. Check & Repair and Format work with them too. Saving files to ext drives isn't supported yet.
+
+<p align="center">
+  <img src="docs/images/finder-sidebar.png" width="760" alt="An ext drive in Finder's sidebar">
+</p>
+
+## Questions and problems
+
+### Is Driveway really free?
+
+Yes. It's open source under the MIT licence. There's no paid version, no trial and no account. The tools it relies on (macFUSE, ntfs-3g and e2fsprogs) are free too.
+
+### Is it safe for my files?
+
+Driveway is careful by design. It never writes to a drive that Windows left in an unfinished state without asking you first, it offers a backup before repairs, and it refuses to touch the disk your Mac runs from. Still, no tool is perfect, so keep a backup of anything important, as you would with any drive.
+
+### My drive is read-only
+
+Open Driveway and select the drive. The **Info** tab says why. The most common reasons:
+
+- **Setup isn't finished**, or Setup says **Write to NTFS drives** is **Not available on this Mac yet**. See [What works on your Mac](#what-works-on-your-mac).
+- **The drive is dirty or hibernated.** See [When a drive mounts read-only](#when-a-drive-mounts-read-only).
+- **Full Disk Access is missing.** See the next question.
+- **Tuxera or Paragon is still installed.** The Info tab names the driver that mounted the drive.
+
+### Driveway asks for Full Disk Access again
+
+macOS sometimes forgets the permission after Driveway updates, because the app isn't signed with a paid developer certificate. Setup then shows the Full Disk Access step again. In **System Settings > Privacy & Security > Full Disk Access**, select **Driveway**, click **−** to remove it, then add it again with **+** as in [Step 5](#step-5-run-setup).
+
+### macOS says Driveway "can't be opened" or "is damaged"
+
+Make sure you downloaded Driveway from this project's [Releases](https://github.com/fedar-piashko-vention/Driveway/releases) page, then follow [Step 4](#step-4-open-driveway-for-the-first-time). If you see "damaged", delete the app and download it again.
+
+### How fast is it?
+
+Fast enough for everyday copying, but slower than Tuxera or Paragon. ntfs-3g is a different kind of driver from theirs, and that's the trade-off for being free. Copying many small files is slower than copying a few large ones.
+
+### Can Driveway fix a badly damaged drive?
+
+Not always. Check & Repair uses `ntfsfix`, which fixes common problems but isn't a full replacement for Windows' `chkdsk`. For serious damage, connect the drive to a Windows PC and run `chkdsk /f`. Back up first.
+
+### Does it work on Intel Macs?
+
+It hasn't been tested on Intel Macs, and the download is built for Apple Silicon only.
+
+### Something else went wrong
+
+Please [open an issue](https://github.com/fedar-piashko-vention/Driveway/issues/new). It helps to include:
+
+- your macOS version and Mac model (Apple menu  > **About This Mac**)
+- what you did and what you expected to happen
+- a screenshot of Setup, and of the drive's **Info** tab
+- Driveway's log: run this in Terminal and attach the file it puts on your Desktop
+
+  ```bash
+  log show --last 1h --predicate 'subsystem BEGINSWITH "app.driveway"' > ~/Desktop/driveway-log.txt
+  ```
+
+## Uninstall
+
+1. Open Driveway and choose **Driveway > Uninstall Driveway Helper…** in the menu bar, then confirm. This removes the helper and gives the app back to you.
+2. Drag **Driveway** from Applications to the Trash.
+
+Your settings stay in `/Library/Application Support/Driveway`, so a reinstall remembers your choices. Delete that folder to remove them too. macFUSE, ntfs-3g and the other tools stay installed. If you don't need them any more, remove them in Terminal:
+
+```bash
+brew uninstall --cask macfuse
+```
+
+```bash
+brew uninstall ntfs-3g-mac ext4fuse-mac e2fsprogs
+```
+
+<details>
+<summary>Removing the helper by hand, in Terminal</summary>
+
+Use this if the app is already gone or the menu item doesn't work.
 
 ```sh
 launchctl bootout "gui/$(id -u)/app.driveway.agent"
 sudo launchctl bootout system/app.driveway.helper
 sudo rm -f /Library/LaunchAgents/app.driveway.agent.plist \
            /Library/LaunchDaemons/app.driveway.helper.plist
-sudo rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app /Library/Logs/Driveway
-sudo chown -R "$USER" /Applications/Driveway.app   # the helper's install made it root's
+sudo rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app \
+            /Library/Filesystems/driveway_ext.fs /Library/Logs/Driveway
+sudo chown -R "$USER" /Applications/Driveway.app   # installing the helper made the app root's
 ```
 
-Without that last line, dragging Driveway to the Trash asks for an administrator password.
+Without the last line, dragging Driveway to the Trash asks for an administrator password.
 
-Your settings in `/Library/Application Support/Driveway` are kept on purpose, so a reinstall remembers your choices. Delete that folder to remove them too. macFUSE, ntfs-3g and the other Homebrew tools stay installed. Remove them with `brew uninstall` if you no longer need them.
+</details>
 
-## Building from source
+## For developers
 
-You need Xcode 26.3 or later (Swift 6.2) on an Apple Silicon Mac running macOS 15.4 or later. The package manifest uses `swift-tools-version: 6.0` and the code uses Swift 6 language mode, so Xcode 16.x is not what it is built and tested with.
+### How it works
+
+Driveway has three parts:
+
+- **The app** runs as you. It shows Setup and the Disk Manager.
+- **The helper** is a small program that runs as root, because ntfs-3g, `ntfsfix`, `mkntfs`, `e2fsck` and `mkfs.ext4` need raw access to the drive. On current macOS, raw access to an external drive also needs Full Disk Access. The helper watches for drives through Disk Arbitration and mounts them with ntfs-3g or ext4fuse on macFUSE. It only accepts requests from Driveway, asks for an administrator password before Format, Repair, Fix & mount and Back up, and refuses to touch the disk macOS runs from, any APFS or macOS system disk, and disk images (unless a developer setting allows them for testing).
+- **The agent** runs in the background after you log in and shows notifications.
+
+macFUSE has two ways to mount drives. Driveway uses the **kernel extension** on a Mac that already allows third-party kernel extensions, and **FSKit** otherwise. If FSKit fails on a macOS build, Driveway remembers that and shows writing as **Not available on this Mac yet** until macOS or macFUSE changes.
+
+ntfs-3g runs with `norecover`, so it never clears the Windows journal on its own. A drive that ntfs-3g can only mount read-only is reported as dirty or hibernated, never shown as read/write. ext drives get a small filesystem bundle in `/Library/Filesystems`, which lets macOS recognise them and show them in Finder's sidebar.
+
+The design choices and their trade-offs are summarised in [docs/spike-results.md](docs/spike-results.md).
+
+### Building from source
+
+You need an Apple Silicon Mac with macOS 15.4 or later and Xcode 26.3 or later (Swift 6.2).
 
 ```sh
 swift test                         # unit tests
 scripts/build-app.sh 0.1.0         # build/Driveway.app and build/Driveway-0.1.0.dmg
 ```
 
-`build-app.sh` builds for arm64, assembles the app with its helper and agent, ad-hoc signs everything with the hardened runtime, and creates the dmg. The version must look like `1.2.3` or `1.2.3-rc1`.
+`build-app.sh` builds for arm64, assembles the app with its helper, agent and ext filesystem bundle, signs everything ad-hoc with the hardened runtime, and creates the dmg. The version must look like `1.2.3` or `1.2.3-rc1`.
 
-The app icon is `Packaging/Driveway.icns`. It is rendered from the gradient in `Packaging/Icon/gradient-source.png` by `scripts/make-icon.swift`. To change it, edit either file, then run `scripts/make-icon.sh` and commit the new `.icns`.
+The app icon is `Packaging/Driveway.icns`. It's rendered from the gradient in `Packaging/Icon/gradient-source.png` by `scripts/make-icon.swift`. To change it, edit either file, then run `scripts/make-icon.sh` and commit the new `.icns`.
 
-CI runs on GitHub's `macos-15` (Apple Silicon) runner. That image's default Xcode is 16.4, so the workflows select the Xcode 26.3 that the image also ships (`sudo xcode-select -s /Applications/Xcode_26.3.app`), the same version used for local builds. Pushing a tag that starts with `v` runs the release workflow, which tests, builds the dmg and attaches it to a GitHub release with the notes from `.github/release-notes.md`.
+CI runs on GitHub's `macos-15` (Apple Silicon) runner and selects the Xcode 26.3 that the image ships. Pushing a tag that starts with `v` runs the release workflow, which tests, builds the dmg and attaches it to a GitHub release with the notes from `.github/release-notes.md`.
 
-## How it works
+### Contributing
 
-The app runs as you. A small helper runs as root, because ntfs-3g, `ntfsfix`, `mkntfs`, `e2fsck` and `mkfs.ext4` need raw disk access. For external drives macOS also requires Full Disk Access for that, which you grant to the helper in Setup. The helper only accepts requests from Driveway, asks for an administrator password before Format, Repair, Fix & mount and Back up, and refuses to touch the disk that holds macOS, any APFS or macOS system disk, and any disk image you did not attach for testing. Format and repair are never offered for those.
+Bug reports, test results and pull requests are welcome.
+
+- **Test reports are especially useful**, above all from macOS 26 or later. Say which macOS version, which macFUSE version, and whether saving files worked.
+- For a pull request, run `swift test` first, and describe what you changed and how you tested it, including on a real drive if the change affects mounting.
+- Keep the app's wording plain and short. Driveway is for people who aren't technical.
 
 ## Licence
 
-[MIT](LICENSE). Driveway runs ntfs-3g and e2fsprogs as separate programs rather than linking them.
+[MIT](LICENSE). Driveway runs ntfs-3g, ext4fuse and e2fsprogs as separate programs rather than linking them. macFUSE has [its own licence](https://github.com/macfuse/macfuse/blob/master/LICENSE.txt), which doesn't allow bundling it, so Setup installs it from Homebrew.
