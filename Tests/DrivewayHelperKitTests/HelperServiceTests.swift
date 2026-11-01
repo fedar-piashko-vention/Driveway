@@ -159,6 +159,24 @@ private func mountedVolume(_ r: HelperResponse) -> Volume? {
     #expect(v.backend == .fskit)
 }
 
+@Test func macOSNeverMountsWhatDrivewaysExtProbeRecognised() async {
+    // Driveway's probe bundle gives DiskArbitration this kind; macOS has no ext driver, so its mount can only fail.
+    let d = disk("disk6s1", kind: ExtProbe.volumeKind, content: "Linux Filesystem", name: "LINUX")
+    let notReady: [Feature: FeatureState] = [.readNTFS: .ready, .writeNTFS: .ready, .extDrives: .notAvailableYet]
+    let h = makeHarness(disks: [d], headers: ["disk6s1": ext4Header], features: notReady)
+    _ = await h.service.handle(.backendStatus, authorization: nil)
+    _ = await h.service.handle(.listVolumes, authorization: nil)
+    #expect(!h.service.shouldApproveMacOSMount(d))
+    // Driveway leaves the drive alone without asking macOS to mount it.
+    #expect(await h.service.diskAppeared(d) == nil)
+    #expect(h.runner.commands.isEmpty)
+    #expect(!h.service.shouldApproveMacOSMount(d))
+
+    // Even with no console user, before the boot disk is known or the backend checked.
+    let early = makeHarness(disks: [d], console: nil)
+    #expect(!early.service.shouldApproveMacOSMount(d))
+}
+
 @Test func fskitMountMustAppear() async {
     let d = disk("disk4s1", name: "BACKUP")
     let h = makeHarness(disks: [d], headers: ["disk4s1": ntfsHeader], probe: .fskit, mounted: false)

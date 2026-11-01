@@ -12,7 +12,7 @@ Driveway is a free, open-source utility that mounts NTFS drives read/write on Ap
 - **NTFS writing needs a working mount backend.** Driveway uses macFUSE's kernel backend on a Mac that already allows third-party kernel extensions (for example because Tuxera or Paragon is or was installed). Otherwise it uses macFUSE's FSKit backend. FSKit is currently broken on macOS 15.7.x: mounts fail even for simple test filesystems. On such a Mac with default settings, drives cannot be written yet, and Setup says "Not available on this Mac yet". Drives stay readable through macOS's own read-only NTFS support.
 - **Driveway never asks you to lower your Mac's security.** It does not guide you through Recovery or kernel-extension settings, and it never changes them itself. Where the kernel backend is available, that is because your Mac already allows it.
 - **Hibernated and Fast Startup drives mount read-only, with no one-click fix.** Forcing such a drive read/write would destroy the unsaved Windows session. Shut Windows down fully, or turn off Fast Startup with `powercfg /hibernate off` in Windows.
-- **ext drives are read-only in v1.** The Homebrew tap Driveway uses has no read/write ext driver. ext volumes mount read-only through `ext4fuse`. Check & Repair and Format for ext work through e2fsprogs. Mounted ext drives don't appear in Finder's sidebar yet: macOS can't recognise ext partitions, and Finder lists only drives it recognises. Open them with **Show in Finder** in Driveway, or from `/Volumes`.
+- **ext drives are read-only in v1.** The Homebrew tap Driveway uses has no read/write ext driver. ext volumes mount read-only through `ext4fuse`. Check & Repair and Format for ext work through e2fsprogs.
 - **`ntfsfix` is not `chkdsk`.** Check & Repair fixes common problems, such as a drive that was unplugged without ejecting. It does not repair deeper damage. For that, connect the drive to a Windows PC and run `chkdsk /f`. Back up first. Driveway offers to image the drive before a repair.
 - **Speed was measured only on a disk image.** With the kernel backend, ntfs-3g wrote 1 GB to a 2 GB disk image on the internal SSD at about 206 MB/s. That is not representative of a USB drive, and no real-drive or FSKit number exists yet. FSKit is documented by macFUSE as slower than the kernel backend, and ntfs-3g is likely to be slower than Tuxera. That trade-off is accepted.
 - **Unsigned build.** There is no paid Apple Developer account behind this project, so builds are ad-hoc signed and not notarized. Each user has to allow the app once (see below). Whether to trust it is your decision. The source is here, and you can build it yourself.
@@ -44,7 +44,7 @@ Setup opens again by itself if something goes missing later, for example after a
 
 ## Uninstall Driveway
 
-Choose **Driveway > Uninstall Driveway Helper…** and confirm. This stops and removes the helper and the login agent, and gives the app back to you. Then drag Driveway from Applications to the Trash.
+Choose **Driveway > Uninstall Driveway Helper…** and confirm. This stops and removes the helper, the login agent and the small ext recogniser in `/Library/Filesystems` (it lets Finder's sidebar list ext drives), and gives the app back to you. Then drag Driveway from Applications to the Trash.
 
 To remove it by hand, in Terminal:
 
@@ -53,7 +53,8 @@ launchctl bootout "gui/$(id -u)/app.driveway.agent"
 sudo launchctl bootout system/app.driveway.helper
 sudo rm -f /Library/LaunchAgents/app.driveway.agent.plist \
            /Library/LaunchDaemons/app.driveway.helper.plist
-sudo rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app /Library/Logs/Driveway
+sudo rm -rf /Library/PrivilegedHelperTools/app.driveway.helper.app /Library/Logs/Driveway \
+            /Library/Filesystems/driveway_ext.fs
 sudo chown -R "$USER" /Applications/Driveway.app   # the helper's install made it root's
 ```
 
